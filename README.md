@@ -4,8 +4,8 @@ Real-time market charting. Raw exchange trades are streamed in, folded into OHLC
 every timeframe on the server, and pushed to the browser over a single WebSocket. Nothing on the
 live path polls.
 
-**Status: Phase 1 (live chart).** Indicators, drawing tools, workspaces, alerts, scripting and
-paper trading are later phases.
+**Status:** Phase 1 (live chart) and Phase 3 (drawing tools, accounts) are done. Indicators,
+workspaces, alerts, scripting and paper trading are later phases.
 
 ## Architecture
 
@@ -81,6 +81,48 @@ from its response headers.
 browser estimates the gateway clock offset from its min-RTT ping. The debug panel (pulse icon in
 the top bar) shows p50/p90/p99 per stage, including browser paint.
 
+### Drawing tools
+
+| Group | Tools |
+|---|---|
+| Lines | Trend line (Alt+T), Ray, Arrow, Horizontal line (Alt+H), Vertical line (Alt+V), Parallel channel (Alt+P) |
+| Fibonacci | Retracement (Alt+F), Trend-based extension |
+| Shapes & text | Rectangle (Alt+R), Text |
+| Forecasting & measurement | Long position, Short position (R:R, target/stop %, open P&L), Measure (Alt+M) |
+
+- **Placing.** Click each point, or press-drag-release for two-point tools. One-click tools are
+  horizontal/vertical line, text and the position tools.
+- **Editing.** Drag handles to edit points, or drag the body to move the whole drawing. The
+  floating bar sets colour, width, line style, background, font size, lock and delete.
+- **Keyboard.** Double-click a text label to edit it. `Del` deletes the selection, `Esc` cancels
+  or deselects, `Ctrl+Z` / `Ctrl+Shift+Z` undo and redo.
+- **Magnet** snaps anchors to the displayed bar's O/H/L/C (Heikin Ashi values on an HA chart).
+  Time always snaps to a bar.
+- **Shared across timeframes.** Drawings belong to the symbol, not the timeframe. Anchors are
+  stored as real timestamps, so a line drawn on 1m lands in the right place on 1h. Anchors can
+  also extend into the future, past the last bar.
+- **Rendering** uses a Lightweight Charts series primitive, in the chart's own paint pass. It
+  can't lag behind pan or zoom, and axis labels show for the selected drawing's anchors.
+- **Persistence.** Signed out, drawings stay in this browser's localStorage. Signed in, they are
+  stored per user per symbol in Postgres. Drawings made while signed out are moved into the
+  account on sign-in. Saves are debounced; payloads are validated on both ends against the shared
+  `Drawing` schema (max 500 drawings per symbol).
+
+### Accounts
+
+- **Tokens.** `POST /api/auth/register | login` returns a 15-minute HS256 access token, kept in
+  browser memory only. It also sets a 30-day refresh token as an `httpOnly`, `SameSite=Strict`
+  cookie scoped to `/api/auth`.
+- **Refresh.** `POST /api/auth/refresh` rotates the refresh token. A rotated-out token presented
+  again after a 10 s grace window counts as theft and revokes the whole session family. The grace
+  window covers two tabs refreshing at once.
+- **Logout** revokes immediately.
+- **Passwords** are hashed with scrypt (N=2^15). Login takes the same time whether or not the
+  email exists.
+- **Rate limits.** Register and login are limited to 10/min per IP.
+- **Origin checks.** Cookie-authenticated endpoints reject foreign `Origin`s.
+- `GET/PUT /api/drawings?symbol=` needs `Authorization: Bearer`.
+
 ### Modules
 
 ```
@@ -93,7 +135,8 @@ services/
   ingest/             upstream streams -> aggregator -> Redis
   ws-gateway/         client WebSockets, fan-out, backpressure, rate limits, demand registry
   api/                history (read-through TimescaleDB cache) and symbol search
-web/                  React + Vite + Zustand + Tailwind; ChartController owns Lightweight Charts
+web/                  React + Vite + Zustand + Tailwind; ChartController owns Lightweight Charts,
+                      drawings/ holds the drawing engine (tools, DrawingManager, persistence)
 deploy/               Dockerfiles, nginx, k8s (kustomize), Prometheus, Grafana dashboard
 test/integration/     end-to-end WebSocket flow against real processes + Redis
 scripts/              build, dev runner, latency probe
@@ -127,8 +170,10 @@ and `BINANCE_WS_URL=wss://data-stream.binance.vision`. To work fully offline, se
 ### Tests
 
 ```sh
-npm test                    # unit: aggregation, bucket math, history cache, HA/hollow, backpressure, Binance mapping
-npm run test:integration    # spawns ingest + ws-gateway with the mock provider; needs Redis (compose) on :56379
+npm test                    # unit: aggregation, bucket math, history cache, HA/hollow, backpressure, Binance mapping,
+                            #       drawing math (fib levels, R:R, measure, hit-testing, time mapping, undo)
+npm run test:integration    # WS flow (ingest + ws-gateway, mock provider, Redis :56379) and
+                            # accounts/drawings (Postgres :55432)
 npm run typecheck
 ```
 
@@ -152,6 +197,7 @@ docker build -f deploy/docker/web.Dockerfile -t <registry>/chartdeck/web:0.1.0 .
 
 kubectl create namespace chartdeck
 kubectl -n chartdeck create secret generic chartdeck-db --from-literal=password="$(openssl rand -base64 24)"
+kubectl -n chartdeck create secret generic chartdeck-auth --from-literal=jwt-secret="$(openssl rand -base64 48)"
 # edit ALLOWED_ORIGINS in deploy/k8s/config.yaml and the host in deploy/k8s/ingress.yaml
 kubectl apply -k deploy/k8s
 ```
@@ -194,5 +240,9 @@ open, needs session-aware bucketing there. That's planned with the NSE adapter.
   DST change are labelled one hour off. Daily and longer bars are always on UTC dates.
 - **Scroll-back to listing date**: the deepest page is shorter than the page size, so it is never
   served from cache and always goes to the provider.
-- **No auth yet.** JWT auth arrives with the first user-scoped feature (drawings, Phase 3). The
-  gateway and API are already rate-limited and validate every input.
+- **Drawings sync is last-write-wins per symbol.** Two tabs editing the same symbol at once can
+  overwrite each other's latest change. There is no live cross-tab sync yet.
+- **No password reset or email verification.** Both need an outbound mail service, which comes
+  with email alerts (Phase 5).
+- **Drawings on very different timeframes.** A 1-minute-precise anchor viewed on 1W is placed
+  proportionally inside its week bar, but time snapping while editing there rounds it to a bar.

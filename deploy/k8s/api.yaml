@@ -17,6 +17,8 @@ spec:
           env:
             - { name: DB_PASSWORD, valueFrom: { secretKeyRef: { name: chartdeck-db, key: password } } }
             - { name: DATABASE_URL, value: "postgres://chartdeck:$(DB_PASSWORD)@timescale:5432/chartdeck" }
+            # Shared by all replicas so any of them can verify any access token.
+            - { name: JWT_SECRET, valueFrom: { secretKeyRef: { name: chartdeck-auth, key: jwt-secret } } }
           ports: [{ name: http, containerPort: 8081 }]
           startupProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 2, failureThreshold: 60 }
           readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }

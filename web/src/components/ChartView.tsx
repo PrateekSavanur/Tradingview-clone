@@ -3,6 +3,8 @@ import { ChartController, type ChartStatus, type LegendData } from '../chart/Cha
 import { feed } from '../lib/feed.ts';
 import { useUi } from '../store/ui.ts';
 import { Legend } from './Legend.tsx';
+import { SelectionToolbar } from './SelectionToolbar.tsx';
+import { TextEditor } from './TextEditor.tsx';
 
 export function ChartView({ onController }: { onController(c: ChartController | null): void }) {
   const el = useRef<HTMLDivElement>(null);
@@ -16,6 +18,7 @@ export function ChartView({ onController }: { onController(c: ChartController | 
     const c = new ChartController(el.current!, feed, { chartType, theme });
     setCtl(c);
     onController(c);
+    if (import.meta.env.DEV) (window as unknown as { __chart?: ChartController }).__chart = c;
     const offLegend = c.onLegend(setLegend);
     const offStatus = c.onStatus(setStatus);
     return () => {
@@ -50,6 +53,8 @@ export function ChartView({ onController }: { onController(c: ChartController | 
     <div className="relative min-h-0 flex-1">
       <div ref={el} className="absolute inset-0" />
       <Legend symbol={symbol} tf={tf} data={legend} />
+      <SelectionToolbar controller={ctl} />
+      <TextEditor controller={ctl} />
       {status?.loading && <Overlay>Loading {symbol.ticker}…</Overlay>}
       {status?.error && (
         <div className="absolute bottom-10 left-1/2 z-10 -translate-x-1/2 rounded-md border border-[var(--down,#f23645)]/40 bg-[var(--panel)] px-3 py-1.5 text-xs text-[#f23645] shadow">

@@ -1,14 +1,20 @@
 import type { MarketDataProvider } from '@chartdeck/data-providers';
 import { ProviderError } from '@chartdeck/data-providers';
-import { TIMEFRAMES, parseSymbolId, toTuple, type SymbolInfo } from '@chartdeck/shared';
+import { DrawingSet, TIMEFRAMES, isSymbolId, parseSymbolId, toTuple, type SymbolInfo } from '@chartdeck/shared';
+import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { Auth } from './auth.ts';
+import type { DrawingStore } from './db.ts';
 import type { HistoryService } from './history.ts';
 
 export interface AppDeps {
   providers: Map<string, MarketDataProvider>;
   history: HistoryService;
+  /** Null when no database is configured; account features then answer 503. */
+  auth: Auth | null;
+  drawings: DrawingStore | null;
   ready: () => Promise<boolean>;
   metrics: () => Promise<{ contentType: string; body: string }>;
   rateLimitPerMinute: number;
@@ -23,6 +29,9 @@ const HistoryQuery = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(500),
 });
 
+const SymbolQuery = z.object({ symbol: z.string().refine(isSymbolId, 'invalid symbol id') });
+const DrawingsBody = z.object({ drawings: DrawingSet });
+
 const SearchQuery = z.object({
   q: z.string().max(40).default(''),
   limit: z.coerce.number().int().min(1).max(50).default(20),
@@ -31,6 +40,7 @@ const SearchQuery = z.object({
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: deps.logger, trustProxy: deps.trustProxy });
 
+  await app.register(cookie);
   await app.register(rateLimit, {
     max: deps.rateLimitPerMinute,
     timeWindow: '1 minute',
@@ -83,6 +93,29 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     reply.header('cache-control', 'no-store');
     return { symbol: q.symbol, tf: q.tf, candles: res.candles.map(toTuple) };
   });
+
+  if (deps.auth && deps.drawings) {
+    const { auth, drawings } = deps;
+    auth.register(app);
+
+    app.get('/api/drawings', { preHandler: auth.requireUser }, async (req) => {
+      const { symbol } = SymbolQuery.parse(req.query);
+      const row = await drawings.get(req.user!.id, symbol);
+      return { symbol, drawings: row?.drawings ?? [], updatedAt: row?.updatedAt ?? null };
+    });
+
+    app.put('/api/drawings', { preHandler: auth.requireUser, bodyLimit: 512 * 1024 }, async (req) => {
+      const { symbol } = SymbolQuery.parse(req.query);
+      const body = DrawingsBody.parse(req.body);
+      const updatedAt = await drawings.put(req.user!.id, symbol, body.drawings);
+      return { symbol, updatedAt };
+    });
+  } else {
+    const unavailable = async (_req: unknown, reply: { status(n: number): { send(b: unknown): unknown } }) =>
+      reply.status(503).send({ error: 'accounts_unavailable', message: 'Accounts need DATABASE_URL to be configured' });
+    app.all('/api/auth/*', unavailable);
+    app.all('/api/drawings', unavailable);
+  }
 
   return app;
 }

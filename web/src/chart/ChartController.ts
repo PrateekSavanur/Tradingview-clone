@@ -3,9 +3,10 @@ import {
   AreaSeries, BarSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, createChart,
   type IChartApi, type ISeriesApi, type LogicalRange, type MouseEventParams, type SeriesType, type Time,
 } from 'lightweight-charts';
+import { DrawingManager } from '../drawings/DrawingManager.ts';
 import { getHistory } from '../lib/api.ts';
 import type { CandleEvent, Feed } from '../lib/feed.ts';
-import { decimalsFor } from '../lib/format.ts';
+import { decimalsFor, formatBarTime, formatPrice, formatVolume } from '../lib/format.ts';
 import { LatencyTracker } from '../lib/latency.ts';
 import type { ChartType, Theme } from '../store/ui.ts';
 import { PALETTES, type ChartPalette } from './theme.ts';
@@ -60,6 +61,7 @@ export class ChartController {
   private readonly offReconnect: () => void;
 
   readonly latency = new LatencyTracker();
+  readonly drawings: DrawingManager;
   status: ChartStatus = { loading: false, loadingOlder: false, reachedStart: false, error: null, bars: 0 };
 
   constructor(container: HTMLElement, private readonly feed: Feed, opts: { chartType: ChartType; theme: Theme }) {
@@ -89,6 +91,23 @@ export class ChartController {
     this.chart.panes()[0]?.setStretchFactor(4);
     this.chart.panes()[1]?.setStretchFactor(1);
 
+    this.drawings = new DrawingManager({
+      chart: this.chart,
+      container,
+      bars: () => this.bars,
+      magnetPrices: (i) => {
+        if (i >= this.bars.length) return [];
+        const b = this.displayBar(i);
+        return this.chartType === 'line' || this.chartType === 'area' ? [b.close] : [b.open, b.high, b.low, b.close];
+      },
+      tf: () => this.tf,
+      fmtPrice: (p) => formatPrice(p, decimalsFor(this.symbol?.tickSize ?? 0.01)),
+      fmtTime: (t) => formatBarTime(t, this.tf),
+      fmtVolume: formatVolume,
+      textColor: () => this.palette.text,
+    });
+    this.drawings.attach(this.main);
+
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(this.onRangeChange);
     this.chart.subscribeCrosshairMove(this.onCrosshair);
     this.offReconnect = feed.onReconnect(() => void this.backfill('reconnect'));
@@ -100,6 +119,7 @@ export class ChartController {
     this.offReconnect();
     window.clearTimeout(this.retryTimer);
     cancelAnimationFrame(this.legendRaf);
+    this.drawings.destroy();
     this.chart.remove();
   }
 
@@ -117,6 +137,8 @@ export class ChartController {
 
   setSymbol(symbol: SymbolInfo, tf: Timeframe): void {
     if (this.symbol?.id === symbol.id && this.tf === tf) return;
+    // Drawings are per symbol and shared by every timeframe.
+    if (this.symbol?.id !== symbol.id) void this.drawings.setSymbol(symbol.id);
     this.symbol = symbol;
     this.tf = tf;
     const precision = decimalsFor(symbol.tickSize);
@@ -132,6 +154,7 @@ export class ChartController {
     // Add before removing: an emptied pane is deleted, which would promote the volume pane to index 0.
     this.main = this.createMainSeries();
     this.main.applyOptions({ priceFormat: old.options().priceFormat });
+    this.drawings.attach(this.main);
     this.chart.removeSeries(old);
     this.renderAll();
   }
@@ -335,7 +358,9 @@ export class ChartController {
 
   /** The bar as displayed (Heikin Ashi or raw). */
   private displayBar(i: number): Candle {
-    return this.chartType === 'heikin' ? this.ha[i]! : this.bars[i]!;
+    if (this.chartType !== 'heikin') return this.bars[i]!;
+    if (this.ha.length !== this.bars.length) this.ha = heikinAshi(this.bars);
+    return this.ha[i]!;
   }
 
   private point(i: number): Record<string, unknown> & { time: Time } {

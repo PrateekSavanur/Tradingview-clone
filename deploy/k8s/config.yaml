@@ -10,5 +10,7 @@ data:
   TRUST_PROXY: "true"
   # Must list the public origin(s) the browser loads the app from.
   ALLOWED_ORIGINS: https://chartdeck.example.com
-# The DB password lives in a Secret you create yourself (see README):
+  COOKIE_SECURE: "true"
+# Secrets you create yourself (see README):
 #   kubectl -n chartdeck create secret generic chartdeck-db --from-literal=password='<strong password>'
+#   kubectl -n chartdeck create secret generic chartdeck-auth --from-literal=jwt-secret="$(openssl rand -base64 48)"
