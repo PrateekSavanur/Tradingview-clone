@@ -1,0 +1,14 @@
+ChartDeck
+Copyright 2026 the ChartDeck authors
+
+This product includes TradingView Lightweight Charts™ (https://github.com/tradingview/lightweight-charts),
+licensed under the Apache License 2.0.
+
+  TradingView Lightweight Charts™
+  Copyright (c) 2025 TradingView, Inc. https://www.tradingview.com/
+
+The licence requires a link to https://www.tradingview.com/ on a page available to users. ChartDeck
+satisfies this with the "Charts by TradingView Lightweight Charts™" link in the application footer
+(the library's on-chart attribution logo is disabled). Keep that link if you modify the UI.
+
+ChartDeck is not affiliated with or endorsed by TradingView, Inc.

@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ws-gateway
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: ws-gateway } }
+  template:
+    metadata:
+      labels: { app: ws-gateway }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8080", prometheus.io/path: /metrics }
+    spec:
+      # Lets open sockets close with 1001 so clients reconnect to another pod before this one dies.
+      terminationGracePeriodSeconds: 20
+      containers:
+        - name: ws-gateway
+          image: chartdeck/ws-gateway
+          envFrom: [{ configMapRef: { name: chartdeck-config } }]
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+          resources:
+            requests: { cpu: 100m, memory: 96Mi }
+            limits: { memory: 512Mi }
+          securityContext: { runAsNonRoot: true, readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ws-gateway
+spec:
+  selector: { app: ws-gateway }
+  ports: [{ name: http, port: 8080 }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ws-gateway
+spec:
+  minAvailable: 1
+  selector: { matchLabels: { app: ws-gateway } }

@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: ingest
+    static_configs: [{ targets: ['ingest:9101'] }]
+  - job_name: ws-gateway
+    static_configs: [{ targets: ['ws-gateway:8080'] }]
+  - job_name: api
+    static_configs: [{ targets: ['api:8081'] }]

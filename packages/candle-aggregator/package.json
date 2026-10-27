@@ -1,0 +1,13 @@
+{
+  "name": "@chartdeck/candle-aggregator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@chartdeck/shared": "*",
+    "ws": "^8.22.0"
+  }
+}

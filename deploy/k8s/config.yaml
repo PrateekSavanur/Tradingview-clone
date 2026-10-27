@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chartdeck-config
+data:
+  REDIS_URL: redis://redis:6379
+  PROVIDERS: binance
+  LOG_LEVEL: info
+  INGEST_FLUSH_MS: "25"
+  TRUST_PROXY: "true"
+  # Must list the public origin(s) the browser loads the app from.
+  ALLOWED_ORIGINS: https://chartdeck.example.com
+# The DB password lives in a Secret you create yourself (see README):
+#   kubectl -n chartdeck create secret generic chartdeck-db --from-literal=password='<strong password>'

@@ -1,0 +1,96 @@
+name: chartdeck
+
+x-service-env: &service-env
+  REDIS_URL: redis://redis:6379
+  PROVIDERS: ${PROVIDERS:-binance}
+  BINANCE_REST_URL: ${BINANCE_REST_URL:-}
+  BINANCE_WS_URL: ${BINANCE_WS_URL:-}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports: ["127.0.0.1:56379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  timescale:
+    image: timescale/timescaledb:2.22.1-pg17
+    environment:
+      POSTGRES_USER: chartdeck
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chartdeck}
+      POSTGRES_DB: chartdeck
+    ports: ["127.0.0.1:55432:5432"]
+    volumes: ["timescale-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chartdeck -d chartdeck"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ingest:
+    build: { context: ., dockerfile: deploy/docker/service.Dockerfile, args: { SERVICE: ingest } }
+    environment:
+      <<: *service-env
+      INGEST_FLUSH_MS: ${INGEST_FLUSH_MS:-25}
+    depends_on: { redis: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9101/readyz"]
+      interval: 10s
+    restart: unless-stopped
+
+  ws-gateway:
+    build: { context: ., dockerfile: deploy/docker/service.Dockerfile, args: { SERVICE: ws-gateway } }
+    environment:
+      <<: *service-env
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      TRUST_PROXY: "true"
+    depends_on: { redis: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+    restart: unless-stopped
+
+  api:
+    build: { context: ., dockerfile: deploy/docker/service.Dockerfile, args: { SERVICE: api } }
+    environment:
+      <<: *service-env
+      DATABASE_URL: postgres://chartdeck:${POSTGRES_PASSWORD:-chartdeck}@timescale:5432/chartdeck
+      TRUST_PROXY: "true"
+    depends_on: { timescale: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/readyz"]
+      interval: 10s
+    restart: unless-stopped
+
+  web:
+    build: { context: ., dockerfile: deploy/docker/web.Dockerfile }
+    ports: ["${WEB_PORT:-3000}:80"]
+    depends_on: [api, ws-gateway]
+    restart: unless-stopped
+
+  # Optional: docker compose --profile monitoring up
+  prometheus:
+    profiles: [monitoring]
+    image: prom/prometheus:v3.5.0
+    volumes: ["./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["127.0.0.1:9090:9090"]
+
+  grafana:
+    profiles: [monitoring]
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/chartdeck-dashboard.json:/var/lib/grafana/dashboards/chartdeck.json:ro
+    ports: ["127.0.0.1:3001:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  timescale-data:

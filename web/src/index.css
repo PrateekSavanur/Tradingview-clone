@@ -1,0 +1,44 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, Ubuntu, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-up: #089981;
+  --color-down: #f23645;
+}
+
+:root {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --border: #e0e3eb;
+  --text: #131722;
+  --muted: #6a6d78;
+  --hover: #f0f3fa;
+  --accent: #2962ff;
+}
+.dark {
+  --bg: #131722;
+  --panel: #1e222d;
+  --border: #2a2e39;
+  --text: #d1d4dc;
+  --muted: #868993;
+  --hover: #2a2e39;
+  --accent: #2962ff;
+}
+
+html, body, #root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,25 @@
+# Exactly one ingest replica: two would each publish every candle. Recreate avoids overlap during rollouts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ingest
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: ingest } }
+  template:
+    metadata:
+      labels: { app: ingest }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9101", prometheus.io/path: /metrics }
+    spec:
+      containers:
+        - name: ingest
+          image: chartdeck/ingest
+          envFrom: [{ configMapRef: { name: chartdeck-config } }]
+          ports: [{ name: ops, containerPort: 9101 }]
+          readinessProbe: { httpGet: { path: /readyz, port: ops }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: ops }, periodSeconds: 10 }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          securityContext: { runAsNonRoot: true, readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }

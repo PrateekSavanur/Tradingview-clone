@@ -1,0 +1,14 @@
+# k3s ships Traefik, which proxies WebSocket upgrades without extra config.
+# The web pod's nginx routes /api and /ws to the backend Services, so one rule is enough.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chartdeck
+spec:
+  rules:
+    - host: chartdeck.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: web, port: { number: 80 } } }
