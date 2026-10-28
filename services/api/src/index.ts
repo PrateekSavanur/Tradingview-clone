@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { createLogger, env, envInt, initMetrics, onShutdown } from '@chartdeck/service-kit';
 import { buildApp } from './app.ts';
 import { Auth } from './auth.ts';
-import { CandleStore, Database, DrawingStore, UserStore } from './db.ts';
+import { CandleStore, Database, DocStore, DrawingStore, UserStore } from './db.ts';
 import { HistoryService } from './history.ts';
 
 const log = createLogger('api');
@@ -57,6 +57,7 @@ const app = await buildApp({
   history: new HistoryService(providers, db && new CandleStore(db), log),
   auth,
   drawings: db && new DrawingStore(db),
+  docs: db && new DocStore(db),
   ready: async () => (db ? db.ping() : true),
   metrics: async () => ({ contentType: registry.contentType, body: await registry.metrics() }),
   rateLimitPerMinute: envInt('API_RATE_LIMIT_PER_MIN', 300),

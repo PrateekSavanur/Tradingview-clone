@@ -2,9 +2,17 @@ import type { SymbolInfo } from '@chartdeck/shared';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { searchSymbols } from '../lib/api.ts';
 import { useUi } from '../store/ui.ts';
+import { useWatchlists } from '../store/watchlists.ts';
+import { useWorkspace } from '../store/workspace.ts';
 
 export function SymbolSearch() {
-  const { searchOpen, searchSeed, closeSearch, setSymbol } = useUi();
+  const { searchOpen, searchSeed, searchTarget, closeSearch } = useUi();
+  const listName = useWatchlists((s) => s.doc.lists[s.doc.active]?.name);
+  const setSymbol = (s: SymbolInfo) => {
+    if (searchTarget === 'watchlist') useWatchlists.getState().add(s);
+    else useWorkspace.getState().setSymbol(s);
+    closeSearch();
+  };
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SymbolInfo[]>([]);
   const [active, setActive] = useState(0);
@@ -72,7 +80,7 @@ export function SymbolSearch() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKey}
-            placeholder="Search symbol, e.g. BTC, ETHUSDT"
+            placeholder={searchTarget === 'watchlist' ? `Add to ${listName ?? 'watchlist'}, e.g. BTC` : 'Search symbol, e.g. BTC, ETHUSDT'}
             className="h-12 flex-1 bg-transparent text-base uppercase outline-none placeholder:normal-case placeholder:text-[var(--muted)]"
             spellCheck={false}
             autoComplete="off"

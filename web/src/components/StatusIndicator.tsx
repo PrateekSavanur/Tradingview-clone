@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ChartController } from '../chart/ChartController.ts';
 import { useFeed } from '../lib/useFeed.ts';
-import { useUi } from '../store/ui.ts';
+import { useActiveChart } from '../store/workspace.ts';
 
 type Level = 'live' | 'delayed' | 'disconnected';
 
@@ -10,7 +10,7 @@ const DELAYED_P50_MS = 1000;
 
 export function StatusIndicator({ controller }: { controller: ChartController | null }) {
   const feed = useFeed();
-  const provider = useUi((s) => s.symbol.provider);
+  const provider = useActiveChart().symbol.provider;
   const [p50, setP50] = useState<number | null>(null);
 
   useEffect(() => {

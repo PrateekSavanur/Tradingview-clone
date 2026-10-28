@@ -1,64 +1,55 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChartController, type ChartStatus, type LegendData } from '../chart/ChartController.ts';
 import { feed } from '../lib/feed.ts';
-import { useUi } from '../store/ui.ts';
 import { decimalsFor } from '../lib/format.ts';
-import { useIndicators } from '../store/indicators.ts';
+import { useUi } from '../store/ui.ts';
+import { useWorkspace } from '../store/workspace.ts';
 import { IndicatorLegend } from './IndicatorLegend.tsx';
 import { Legend } from './Legend.tsx';
 import { SelectionToolbar } from './SelectionToolbar.tsx';
 import { TextEditor } from './TextEditor.tsx';
 
-export function ChartView({ onController }: { onController(c: ChartController | null): void }) {
+/** One cell of the layout: owns a ChartController and mirrors chart `index` of the workspace into it. */
+export function ChartView({ index, onController }: { index: number; onController(index: number, c: ChartController | null): void }) {
   const el = useRef<HTMLDivElement>(null);
   const [ctl, setCtl] = useState<ChartController | null>(null);
   const [legend, setLegend] = useState<LegendData | null>(null);
   const [status, setStatus] = useState<ChartStatus | null>(null);
-  const { symbol, tf, chartType, theme, openSearch } = useUi();
-  const indicatorList = useIndicators((s) => s.list);
+  const chart = useWorkspace((s) => s.ws.charts[index]!);
+  const active = useWorkspace((s) => s.ws.active === index);
+  const multi = useWorkspace((s) => s.ws.layout !== '1');
+  const setActive = useWorkspace((s) => s.setActive);
+  const theme = useUi((s) => s.theme);
+  const { symbol, tf, chartType, indicators, logScale = false } = chart;
 
   useEffect(() => {
-    const { chartType, theme } = useUi.getState();
-    const c = new ChartController(el.current!, feed, { chartType, theme });
+    const c = new ChartController(el.current!, feed, { chartType: useWorkspace.getState().ws.charts[index]!.chartType, theme: useUi.getState().theme });
     setCtl(c);
-    onController(c);
-    if (import.meta.env.DEV) (window as unknown as { __chart?: ChartController }).__chart = c;
+    onController(index, c);
+    if (import.meta.env.DEV) ((window as unknown as { __charts?: ChartController[] }).__charts ??= [])[index] = c;
     const offLegend = c.onLegend(setLegend);
     const offStatus = c.onStatus(setStatus);
     return () => {
       offLegend();
       offStatus();
-      onController(null);
+      onController(index, null);
       c.destroy();
     };
-  }, [onController]);
+  }, [index, onController]);
 
   useEffect(() => ctl?.setSymbol(symbol, tf), [ctl, symbol, tf]);
   useEffect(() => ctl?.setChartType(chartType), [ctl, chartType]);
   useEffect(() => ctl?.setTheme(theme), [ctl, theme]);
-  useEffect(() => ctl?.setIndicators(indicatorList), [ctl, indicatorList]);
-
-  // Typing a letter or digit on the chart opens symbol search, prefilled.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (e.ctrlKey || e.metaKey || e.altKey || t.closest('input, textarea, [contenteditable]')) return;
-      if (/^[a-z0-9]$/i.test(e.key)) {
-        e.preventDefault();
-        // Keys can land here before the dialog's input takes focus; keep them rather than restarting.
-        const { searchOpen, searchSeed } = useUi.getState();
-        openSearch((searchOpen ? searchSeed : '') + e.key.toUpperCase());
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [openSearch]);
+  useEffect(() => ctl?.setIndicators(indicators), [ctl, indicators]);
+  useEffect(() => ctl?.setLogScale(logScale), [ctl, logScale]);
+  useEffect(() => ctl?.setActive(active), [ctl, active]);
 
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="relative min-h-0 min-w-0 bg-[var(--bg)]" onPointerDownCapture={() => setActive(index)}>
       <div ref={el} className="absolute inset-0" />
+      {multi && active && <div className="pointer-events-none absolute inset-0 z-20 border-2 border-[var(--accent)]/70" aria-hidden />}
       <Legend symbol={symbol} tf={tf} data={legend} />
-      <IndicatorLegend items={legend?.indicators ?? []} controller={ctl} priceDecimals={decimalsFor(symbol.tickSize)} />
+      <IndicatorLegend chart={index} items={legend?.indicators ?? []} controller={ctl} priceDecimals={decimalsFor(symbol.tickSize)} />
       <SelectionToolbar controller={ctl} />
       <TextEditor controller={ctl} />
       {status?.loading && <Overlay>Loading {symbol.ticker}…</Overlay>}

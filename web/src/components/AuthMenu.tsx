@@ -19,7 +19,7 @@ export function AuthMenu() {
   if (!user) {
     return (
       <>
-        <button onClick={() => setDialog(true)} className="h-7 rounded bg-[var(--accent)] px-2.5 text-xs font-medium text-white hover:opacity-90" title="Sign in to sync drawings across devices">
+        <button onClick={() => setDialog(true)} className="h-7 rounded bg-[var(--accent)] px-2.5 text-xs font-medium text-white hover:opacity-90" title="Sign in to sync drawings, layouts and watchlists across devices">
           Sign in
         </button>
         {dialog && <AuthDialog onClose={() => setDialog(false)} />}

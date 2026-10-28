@@ -10,7 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../../services/api/src/app.ts';
 import { Auth } from '../../services/api/src/auth.ts';
-import { Database, DrawingStore, UserStore } from '../../services/api/src/db.ts';
+import { Database, DocStore, DrawingStore, UserStore } from '../../services/api/src/db.ts';
 import { HistoryService } from '../../services/api/src/history.ts';
 
 const DB_URL = process.env.TEST_DATABASE_URL ?? 'postgres://chartdeck:chartdeck@127.0.0.1:55432/chartdeck';
@@ -29,6 +29,7 @@ beforeAll(async () => {
     history: new HistoryService(providers, null, log),
     auth: new Auth({ users: new UserStore(db), jwtSecret: randomBytes(32), allowedOrigins: [ORIGIN], credentialRateLimitPerMin: 1000 }),
     drawings: new DrawingStore(db),
+    docs: new DocStore(db),
     ready: async () => true,
     metrics: async () => ({ contentType: 'text/plain', body: '' }),
     rateLimitPerMinute: 1000,
@@ -121,7 +122,7 @@ describe('auth', () => {
     const strictApp = await buildApp({
       providers, history: new HistoryService(providers, null, log),
       auth: new A({ users: new UserStore(db), jwtSecret: randomBytes(32), allowedOrigins: [ORIGIN] }),
-      drawings: new DrawingStore(db), ready: async () => true,
+      drawings: new DrawingStore(db), docs: new DocStore(db), ready: async () => true,
       metrics: async () => ({ contentType: 'text/plain', body: '' }), rateLimitPerMinute: 1000, trustProxy: false, logger: false,
     });
     const codes: number[] = [];
@@ -177,5 +178,64 @@ describe('drawings', () => {
       const r = await app.inject({ method: 'PUT', url: '/api/drawings?symbol=binance:BTCUSDT', headers, payload: { drawings: [d] } });
       expect(r.statusCode, JSON.stringify(d)).toBe(400);
     }
+  });
+});
+
+describe('user docs (layouts, templates, watchlists, workspace)', () => {
+  const btc = { id: 'binance:BTCUSDT', provider: 'binance', ticker: 'BTCUSDT', description: 'BTC / USDT', exchange: 'Binance', type: 'crypto', tickSize: 0.01 };
+  const workspace = {
+    layout: '2', active: 0, sync: { symbol: false, interval: false, crosshair: true, time: false },
+    charts: [
+      { symbol: btc, tf: '1m', chartType: 'candles', indicators: [] },
+      { symbol: btc, tf: '1h', chartType: 'heikin', indicators: [{ uid: 'abcd1234', type: 'rsi', inputs: { length: 14, source: 'close' }, plots: { rsi: { color: '#7e57c2', width: 2, visible: true } }, hidden: false }] },
+    ],
+  };
+
+  it('stores, lists, reads and deletes named layouts per user', async () => {
+    const { body } = await register();
+    const other = await register();
+    const h = { authorization: `Bearer ${body.accessToken}` };
+    expect((await app.inject({ method: 'PUT', url: '/api/docs/layouts/Scalping%20setup', headers: h, payload: { data: workspace } })).statusCode).toBe(200);
+    const list = await app.inject({ method: 'GET', url: '/api/docs/layouts', headers: h });
+    expect(list.json().map((d: { name: string }) => d.name)).toEqual(['Scalping setup']);
+    const got = await app.inject({ method: 'GET', url: '/api/docs/layouts/Scalping%20setup', headers: h });
+    expect(got.json().data).toEqual(workspace);
+    const foreign = await app.inject({ method: 'GET', url: '/api/docs/layouts/Scalping%20setup', headers: { authorization: `Bearer ${other.body.accessToken}` } });
+    expect(foreign.statusCode).toBe(404);
+    expect((await app.inject({ method: 'DELETE', url: '/api/docs/layouts/Scalping%20setup', headers: h })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/docs/layouts/Scalping%20setup', headers: h })).statusCode).toBe(404);
+  });
+
+  it('validates each kind against its schema', async () => {
+    const { body } = await register();
+    const h = { authorization: `Bearer ${body.accessToken}` };
+    const bad = [
+      ['layouts', { ...workspace, layout: '9' }],
+      ['workspace', { ...workspace, charts: [] }],
+      ['templates', { indicators: [{ uid: '<script>', type: 'rsi', inputs: {}, plots: {}, hidden: false }] }],
+      ['watchlists', { active: 0, lists: [{ name: 'x', symbols: [{ ...btc, id: 'not a symbol' }] }] }],
+      ['watchlists', { active: 1, lists: [{ name: 'x', symbols: [] }] }],
+      ['workspace', { ...workspace, active: 2 }],
+    ] as const;
+    for (const [kind, data] of bad) {
+      const r = await app.inject({ method: 'PUT', url: `/api/docs/${kind}/current`, headers: h, payload: { data } });
+      expect(r.statusCode, kind).toBe(400);
+    }
+    expect((await app.inject({ method: 'PUT', url: '/api/docs/secrets/current', headers: h, payload: { data: {} } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'PUT', url: '/api/docs/workspace/other', headers: h, payload: { data: workspace } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'PUT', url: '/api/docs/watchlists/current', headers: h, payload: { data: { active: 0, lists: [{ name: 'Crypto', symbols: [btc] }] } } })).statusCode).toBe(200);
+  });
+
+  it('caps the number of documents per kind', async () => {
+    const { body } = await register();
+    const h = { authorization: `Bearer ${body.accessToken}` };
+    await db.pool.query(
+      `INSERT INTO user_docs (user_id, kind, name, data) SELECT $1, 'templates', 't' || g, '{"indicators":[]}' FROM generate_series(1, 100) g`,
+      [body.user.id],
+    );
+    const r = await app.inject({ method: 'PUT', url: '/api/docs/templates/one-more', headers: h, payload: { data: { indicators: [] } } });
+    expect(r.statusCode).toBe(409);
+    const overwrite = await app.inject({ method: 'PUT', url: '/api/docs/templates/t1', headers: h, payload: { data: { indicators: [] } } });
+    expect(overwrite.statusCode).toBe(200);
   });
 });

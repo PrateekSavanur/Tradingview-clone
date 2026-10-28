@@ -3,6 +3,7 @@ import type { ChartController } from '../chart/ChartController.ts';
 import { feed } from '../lib/feed.ts';
 import { STAGES, STAGE_LABELS, type Stage, type StageStats } from '../lib/latency.ts';
 import { useUi } from '../store/ui.ts';
+import { useActiveChart } from '../store/workspace.ts';
 
 interface Snapshot {
   stats: Record<Stage, StageStats> | null;
@@ -15,7 +16,8 @@ interface Snapshot {
 }
 
 export function DebugPanel({ controller }: { controller: ChartController | null }) {
-  const { debugOpen, toggleDebug, symbol } = useUi();
+  const { debugOpen, toggleDebug } = useUi();
+  const { symbol } = useActiveChart();
   const [snap, setSnap] = useState<Snapshot | null>(null);
 
   useEffect(() => {

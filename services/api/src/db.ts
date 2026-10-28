@@ -34,6 +34,14 @@ const MIGRATIONS = [
   `CREATE INDEX IF NOT EXISTS refresh_tokens_family ON refresh_tokens (family)`,
   // used_at: rotated (successor issued). revoked_at: logged out or family killed after reuse.
   `ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS used_at timestamptz`,
+  `CREATE TABLE IF NOT EXISTS user_docs (
+     user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     kind       text NOT NULL,
+     name       text NOT NULL,
+     data       jsonb NOT NULL,
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     PRIMARY KEY (user_id, kind, name)
+   )`,
   `CREATE TABLE IF NOT EXISTS drawings (
      user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      symbol     text NOT NULL,
@@ -164,6 +172,45 @@ export class UserStore {
 
   async revokeFamily(family: string): Promise<void> {
     await this.db.pool.query(`UPDATE refresh_tokens SET revoked_at = now() WHERE family = $1 AND revoked_at IS NULL`, [family]);
+  }
+}
+
+export class DocStore {
+  constructor(private readonly db: Database) {}
+
+  async list(userId: string, kind: string): Promise<Array<{ name: string; updatedAt: number }>> {
+    const { rows } = await this.db.pool.query<{ name: string; updated_at: Date }>(
+      `SELECT name, updated_at FROM user_docs WHERE user_id = $1 AND kind = $2 ORDER BY lower(name)`,
+      [userId, kind],
+    );
+    return rows.map((r) => ({ name: r.name, updatedAt: r.updated_at.getTime() }));
+  }
+
+  async get(userId: string, kind: string, name: string): Promise<{ data: unknown; updatedAt: number } | null> {
+    const { rows } = await this.db.pool.query<{ data: unknown; updated_at: Date }>(
+      `SELECT data, updated_at FROM user_docs WHERE user_id = $1 AND kind = $2 AND name = $3`,
+      [userId, kind, name],
+    );
+    return rows[0] ? { data: rows[0].data, updatedAt: rows[0].updated_at.getTime() } : null;
+  }
+
+  /** Upsert; returns null when creating it would exceed `maxPerKind`. */
+  async put(userId: string, kind: string, name: string, data: unknown, maxPerKind: number): Promise<number | null> {
+    const { rows } = await this.db.pool.query<{ updated_at: Date }>(
+      `INSERT INTO user_docs (user_id, kind, name, data)
+       SELECT $1, $2, $3, $4
+        WHERE EXISTS (SELECT 1 FROM user_docs WHERE user_id = $1 AND kind = $2 AND name = $3)
+           OR (SELECT count(*) FROM user_docs WHERE user_id = $1 AND kind = $2) < $5
+       ON CONFLICT (user_id, kind, name) DO UPDATE SET data = EXCLUDED.data, updated_at = now()
+       RETURNING updated_at`,
+      [userId, kind, name, JSON.stringify(data), maxPerKind],
+    );
+    return rows[0]?.updated_at.getTime() ?? null;
+  }
+
+  async delete(userId: string, kind: string, name: string): Promise<boolean> {
+    const r = await this.db.pool.query(`DELETE FROM user_docs WHERE user_id = $1 AND kind = $2 AND name = $3`, [userId, kind, name]);
+    return (r.rowCount ?? 0) > 0;
   }
 }
 

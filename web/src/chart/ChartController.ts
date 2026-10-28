@@ -1,9 +1,10 @@
 import { TF_MS, type Candle, type SymbolInfo, type Timeframe } from '@chartdeck/shared';
 import {
-  AreaSeries, BarSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, createChart,
+  AreaSeries, BarSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, PriceScaleMode, createChart,
   type IChartApi, type ISeriesApi, type LogicalRange, type MouseEventParams, type SeriesType, type Time,
 } from 'lightweight-charts';
 import { DrawingManager } from '../drawings/DrawingManager.ts';
+import { TimeIndex } from '../drawings/geometry.ts';
 import type { IndicatorInstance } from '../store/indicators.ts';
 import { IndicatorLayer, type IndicatorLegendItem } from './IndicatorLayer.ts';
 import { getHistory } from '../lib/api.ts';
@@ -28,6 +29,13 @@ export interface ChartStatus {
   reachedStart: boolean;
   error: string | null;
   bars: number;
+}
+
+/** What one chart tells linked charts: the viewport as times, so it carries across timeframes. */
+export interface VisibleTimes {
+  from: number;
+  to: number;
+  tf: Timeframe;
 }
 
 const PAGE = 500;
@@ -62,6 +70,10 @@ export class ChartController {
   private readonly statusListeners = new Set<(s: ChartStatus) => void>();
   private retryTimer: number | undefined;
   private readonly offReconnect: () => void;
+  /** Pointer is over this chart: its crosshair and scrolling drive linked charts, not the reverse. */
+  private pointerInside = false;
+  private readonly crosshairSyncListeners = new Set<(time: number | null) => void>();
+  private readonly rangeSyncListeners = new Set<(r: VisibleTimes) => void>();
 
   readonly latency = new LatencyTracker();
   readonly drawings: DrawingManager;
@@ -116,6 +128,8 @@ export class ChartController {
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(this.onRangeChange);
     this.chart.subscribeCrosshairMove(this.onCrosshair);
     this.offReconnect = feed.onReconnect(() => void this.backfill('reconnect'));
+    container.addEventListener('pointerenter', this.onPointerEnter);
+    container.addEventListener('pointerleave', this.onPointerLeave);
   }
 
   destroy(): void {
@@ -124,8 +138,20 @@ export class ChartController {
     this.offReconnect();
     window.clearTimeout(this.retryTimer);
     cancelAnimationFrame(this.legendRaf);
+    const c = this.chart.chartElement().parentElement;
+    c?.removeEventListener('pointerenter', this.onPointerEnter);
+    c?.removeEventListener('pointerleave', this.onPointerLeave);
     this.drawings.destroy();
     this.chart.remove();
+  }
+
+  /** The active chart in a multi-chart layout takes keyboard shortcuts and the drawing toolbar. */
+  setActive(active: boolean): void {
+    this.drawings.setActive(active);
+  }
+
+  setLogScale(on: boolean): void {
+    this.main.priceScale().applyOptions({ mode: on ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal });
   }
 
   onLegend(fn: (d: LegendData | null) => void): () => void {
@@ -161,6 +187,7 @@ export class ChartController {
     // Add before removing: an emptied pane is deleted, which would promote the volume pane to index 0.
     this.main = this.createMainSeries();
     this.main.applyOptions({ priceFormat: old.options().priceFormat });
+    this.main.priceScale().applyOptions({ mode: old.priceScale().options().mode });
     this.drawings.attach(this.main);
     this.indicators.setMain(this.main);
     this.chart.removeSeries(old);
@@ -191,6 +218,69 @@ export class ChartController {
     this.main.applyOptions(this.seriesStyle());
     this.renderAll();
   }
+
+  // ---------------------------------------------------------------- linked charts
+
+  /** Crosshair moves made by the user on this chart, as a bar open time (ms), null when it leaves. */
+  onCrosshairSync(fn: (time: number | null) => void): () => void {
+    this.crosshairSyncListeners.add(fn);
+    return () => this.crosshairSyncListeners.delete(fn);
+  }
+
+  /** Scrolling and zooming done by the user on this chart. */
+  onRangeSync(fn: (r: VisibleTimes) => void): () => void {
+    this.rangeSyncListeners.add(fn);
+    return () => this.rangeSyncListeners.delete(fn);
+  }
+
+  /** Mirror another chart's crosshair onto the bar containing `time`, at that bar's close. */
+  showCrosshair(time: number | null): void {
+    const n = this.bars.length;
+    if (time === null || !n || this.pointerInside) {
+      if (!this.pointerInside) this.chart.clearCrosshairPosition();
+      return;
+    }
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.bars[mid]!.time <= time) lo = mid;
+      else hi = mid - 1;
+    }
+    const step = TF_MS[this.tf]; // an upper bound for 1M, which is fine here
+    if (this.bars[lo]!.time > time || time >= this.bars[n - 1]!.time + step) {
+      this.chart.clearCrosshairPosition();
+      return;
+    }
+    this.chart.setCrosshairPosition(this.displayBar(lo).close, toChartTime(this.bars[lo]!.time, this.tf), this.main);
+  }
+
+  /**
+   * Follow another chart's scrolling. On the same timeframe the whole range is matched (zoom too);
+   * across timeframes only the right edge is, keeping this chart's own bar spacing.
+   */
+  showTimes(r: VisibleTimes): void {
+    if (this.pointerInside || this.status.loading || !this.bars.length) return;
+    const idx = new TimeIndex(this.bars, this.tf);
+    const ts = this.chart.timeScale();
+    const to = idx.logicalOf(r.to);
+    if (r.tf === this.tf) {
+      ts.setVisibleLogicalRange({ from: idx.logicalOf(r.from), to });
+      return;
+    }
+    const cur = ts.getVisibleLogicalRange();
+    if (!cur) return;
+    ts.setVisibleLogicalRange({ from: to - (cur.to - cur.from), to });
+  }
+
+  private readonly onPointerEnter = () => {
+    this.pointerInside = true;
+  };
+
+  private readonly onPointerLeave = () => {
+    this.pointerInside = false;
+    this.crosshairSyncListeners.forEach((fn) => fn(null));
+  };
 
   // ---------------------------------------------------------------- loading
 
@@ -231,6 +321,11 @@ export class ChartController {
 
   private readonly onRangeChange = (range: LogicalRange | null) => {
     if (range && range.from < SCROLLBACK_TRIGGER_BARS) void this.loadOlder();
+    if (range && this.pointerInside && this.rangeSyncListeners.size && this.bars.length && !this.status.loading) {
+      const idx = new TimeIndex(this.bars, this.tf);
+      const r = { from: idx.timeOf(range.from), to: idx.timeOf(range.to), tf: this.tf };
+      this.rangeSyncListeners.forEach((fn) => fn(r));
+    }
   };
 
   private async loadOlder(): Promise<void> {
@@ -440,6 +535,8 @@ export class ChartController {
   private readonly onCrosshair = (param: MouseEventParams) => {
     this.crosshairTime = param.time === undefined || !param.point ? null : fromChartTime(param.time as number, this.tf);
     this.scheduleLegend();
+    // Moves we made with setCrosshairPosition carry no source event; only echo the user's own.
+    if (param.sourceEvent && this.pointerInside) this.crosshairSyncListeners.forEach((fn) => fn(this.crosshairTime));
   };
 
   private scheduleLegend(): void {

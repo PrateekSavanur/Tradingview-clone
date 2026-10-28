@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ChartController } from './chart/ChartController.ts';
-import { ChartView } from './components/ChartView.tsx';
+import { ChartGrid } from './components/ChartGrid.tsx';
 import { DebugPanel } from './components/DebugPanel.tsx';
 import { DrawingToolbar } from './components/DrawingToolbar.tsx';
 import { IndicatorPicker } from './components/IndicatorPicker.tsx';
 import { IndicatorSettings } from './components/IndicatorSettings.tsx';
 import { SymbolSearch } from './components/SymbolSearch.tsx';
 import { TopBar } from './components/TopBar.tsx';
+import { WatchlistPanel } from './components/WatchlistPanel.tsx';
 import { importLocalDrawings } from './drawings/persistence.ts';
 import { useAuth } from './lib/auth.ts';
 import { useUi } from './store/ui.ts';
+import { useActiveChart, useWorkspace } from './store/workspace.ts';
 
 export function App() {
   const theme = useUi((s) => s.theme);
-  const symbol = useUi((s) => s.symbol);
-  const [controller, setController] = useState<ChartController | null>(null);
-  const onController = useCallback((c: ChartController | null) => setController(c), []);
+  const watchlistOpen = useUi((s) => s.watchlistOpen);
+  const { symbol } = useActiveChart();
+  const active = useWorkspace((s) => s.ws.active);
+  const [controllers, setControllers] = useState<ReadonlyArray<ChartController | null>>([]);
+  const onControllers = useCallback((cs: ReadonlyArray<ChartController | null>) => setControllers(cs), []);
+  const controller = controllers[active] ?? null;
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -25,10 +30,27 @@ export function App() {
     document.title = `${symbol.ticker} · ChartDeck`;
   }, [symbol.ticker]);
 
+  // Typing a letter or digit anywhere outside a field opens symbol search for the active chart, prefilled.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.ctrlKey || e.metaKey || e.altKey || t.closest('input, textarea, select, [contenteditable]')) return;
+      if (/^[a-z0-9]$/i.test(e.key)) {
+        e.preventDefault();
+        // Keys can land here before the dialog's input takes focus; keep them rather than restarting.
+        const { searchOpen, searchSeed, searchTarget, openSearch } = useUi.getState();
+        openSearch((searchOpen ? searchSeed : '') + e.key.toUpperCase(), searchOpen ? searchTarget : 'chart');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   // Drawings changed on another device show up when this tab regains focus, and every 30 s while visible.
   useEffect(() => {
     const refresh = () => {
-      if (document.visibilityState === 'visible' && useAuth.getState().user) void controller?.drawings.refreshRemote();
+      if (document.visibilityState !== 'visible' || !useAuth.getState().user) return;
+      for (const c of controllers) void c?.drawings.refreshRemote();
     };
     document.addEventListener('visibilitychange', refresh);
     window.addEventListener('focus', refresh);
@@ -38,18 +60,18 @@ export function App() {
       window.removeEventListener('focus', refresh);
       window.clearInterval(t);
     };
-  }, [controller]);
+  }, [controllers]);
 
   // Signing in moves signed-out drawings into the account; any sign-in/out switches the drawing source.
   useEffect(
     () =>
       useAuth.subscribe((s, prev) => {
         if (!prev.ready || s.user?.id === prev.user?.id) return;
-        const reload = () => controller?.drawings.reload();
+        const reload = () => controllers.forEach((c) => void c?.drawings.reload());
         if (s.user) importLocalDrawings().catch((err) => console.warn('[drawings] import failed', err)).finally(reload);
-        else void reload();
+        else reload();
       }),
-    [controller],
+    [controllers],
   );
 
   return (
@@ -58,9 +80,10 @@ export function App() {
       <div className="flex min-h-0 flex-1">
         <DrawingToolbar controller={controller} />
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          <ChartView onController={onController} />
+          <ChartGrid onControllers={onControllers} />
           <DebugPanel controller={controller} />
         </main>
+        {watchlistOpen && <WatchlistPanel />}
       </div>
       <footer className="flex h-6 shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--panel)] px-3 text-[11px] text-[var(--muted)]">
         <span>{symbol.description} · {symbol.exchange}</span>

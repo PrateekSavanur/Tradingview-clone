@@ -4,8 +4,8 @@ Real-time market charting. Raw exchange trades are streamed in, folded into OHLC
 every timeframe on the server, and pushed to the browser over a single WebSocket. Nothing on the
 live path polls.
 
-**Status:** Phases 1 (live chart), 2 (indicators) and 3 (drawing tools, accounts) are done.
-Workspaces, alerts, scripting and paper trading are next.
+**Status:** Phases 1 (live chart), 2 (indicators), 3 (drawing tools, accounts) and 4 (workspaces)
+are done. Alerts, scripting and paper trading are next.
 
 ## Architecture
 
@@ -163,7 +163,34 @@ or timeframe switch.
   email exists.
 - **Rate limits.** Register and login are limited to 10/min per IP.
 - **Origin checks.** Cookie-authenticated endpoints reject foreign `Origin`s.
-- `GET/PUT /api/drawings?symbol=` needs `Authorization: Bearer`.
+- `GET/PUT /api/drawings?symbol=` and `/api/docs/*` need `Authorization: Bearer`.
+
+### Workspaces
+
+- **Layouts.** 1, 2 (side by side or stacked), 3, 4 or 6 charts. Each chart has its own symbol,
+  timeframe, chart type, log scale and indicators. Clicking a chart makes it active; the top bar,
+  drawing toolbar, symbol search and keyboard shortcuts act on the active chart. Shrinking the
+  layout keeps the hidden charts, so growing it again brings them back.
+- **Linking.** Symbol and interval links make a change on one chart apply to every visible chart.
+  The crosshair link mirrors the hovered bar's time onto the other charts. The time link scrolls
+  them along: on the same timeframe the whole range (zoom included) is matched, and across
+  timeframes only the right edge is. The chart under the pointer drives the others, so updates
+  never echo back.
+- **Saved layouts** snapshot the whole workspace under a name. **Indicator templates** save one
+  chart's indicators and replace another chart's when opened (picker → Templates).
+- **Watchlists.** There can be several named lists in a side panel, reordered by dragging. Each
+  row streams its daily bar over the chart WebSocket while it is on screen. Off-screen rows don't
+  subscribe, which keeps a long list within the gateway's per-connection subscription cap.
+  Clicking a row opens the symbol on the active chart.
+- **Storage.** Documents go through `GET/PUT/DELETE /api/docs/:kind/:name`, where kind is
+  `workspace`, `layouts`, `templates` or `watchlists`. Each kind is validated against its shared
+  zod schema, with at most 100 documents per kind per user. `workspace` and `watchlists` hold a
+  single document named `current`. The workspace and watchlists are always cached in
+  localStorage, so the app opens instantly. Signed in, changes are also saved to the account
+  (debounced, retried). On sign-in, the account's copy replaces the browser's, or receives it if
+  the account has none. Layouts and templates saved while signed out move into the account, and
+  a name clash gets a ` (local)` suffix.
+- **Charts sharing a symbol** share its drawings live within the tab.
 
 ### Modules
 
@@ -213,9 +240,10 @@ and `BINANCE_WS_URL=wss://data-stream.binance.vision`. To work fully offline, se
 
 ```sh
 npm test                    # unit: aggregation, bucket math, history cache, HA/hollow, backpressure, Binance mapping,
-                            #       drawing math (fib levels, R:R, measure, hit-testing, time mapping, undo)
+                            #       drawing math (fib levels, R:R, measure, hit-testing, time mapping, undo),
+                            #       workspace model (layouts, linking, normalising saved layouts)
 npm run test:integration    # WS flow (ingest + ws-gateway, mock provider, Redis :56379) and
-                            # accounts/drawings (Postgres :55432)
+                            # accounts/drawings/docs (Postgres :55432)
 npm run typecheck
 ```
 
@@ -285,8 +313,9 @@ open, needs session-aware bucketing there. That's planned with the NSE adapter.
 - **Drawing sync is last-write-wins per symbol**, refreshed on focus and every 30 s rather than
   pushed live. Two devices editing the same symbol within the same window can overwrite each
   other's latest change.
-- **Indicator sets** are saved per browser for now. Saved layouts, synced to the account, come
-  with Phase 4.
+- **Workspace sync is last-write-wins** like drawings: two devices open at once each save their
+  own layout, and the account keeps whichever saved last. A device picks up the other's workspace
+  when it next loads or signs in, not live.
 - **No password reset or email verification.** Both need an outbound mail service, which comes
   with email alerts (Phase 5).
 - **Drawings on very different timeframes.** A 1-minute-precise anchor viewed on 1W is placed

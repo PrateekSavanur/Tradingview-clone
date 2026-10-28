@@ -3,11 +3,15 @@ import { useEffect, useRef, useState } from 'react';
 import type { ChartController } from '../chart/ChartController.ts';
 import { useIndicators } from '../store/indicators.ts';
 import { CHART_TYPES, CHART_TYPE_LABELS, useUi, type ChartType } from '../store/ui.ts';
+import { useActiveChart, useWorkspace } from '../store/workspace.ts';
 import { AuthMenu } from './AuthMenu.tsx';
+import { LayoutMenu } from './LayoutMenu.tsx';
 import { StatusIndicator } from './StatusIndicator.tsx';
 
 export function TopBar({ controller }: { controller: ChartController | null }) {
-  const { symbol, tf, setTf, theme, toggleTheme, toggleDebug, debugOpen, openSearch } = useUi();
+  const { theme, toggleTheme, toggleDebug, debugOpen, openSearch, watchlistOpen, toggleWatchlist } = useUi();
+  const { symbol, tf, logScale = false } = useActiveChart();
+  const { setTf, setLogScale } = useWorkspace.getState();
   return (
     <header className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--panel)] px-2">
       <div className="mr-1 flex items-center gap-1.5 pl-1 pr-2 font-semibold tracking-tight">
@@ -46,10 +50,23 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
         <span className="font-serif text-[15px] italic leading-none">fx</span>
         <span className="hidden lg:inline">Indicators</span>
       </button>
+      <button
+        onClick={() => setLogScale(!logScale)}
+        aria-pressed={logScale}
+        className={`h-8 shrink-0 rounded px-2 text-[13px] hover:bg-[var(--hover)] ${logScale ? 'font-semibold text-[var(--accent)]' : ''}`}
+        title="Logarithmic price scale"
+      >
+        log
+      </button>
+      <Divider />
+      <LayoutMenu />
       <div className="flex-1" />
       <StatusIndicator controller={controller} />
       <IconButton onClick={toggleDebug} pressed={debugOpen} title="Latency debug panel">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
+      </IconButton>
+      <IconButton onClick={toggleWatchlist} pressed={watchlistOpen} title="Watchlist">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
       </IconButton>
       <IconButton onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>
         {theme === 'dark' ? (
@@ -66,7 +83,8 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
 }
 
 function ChartTypeMenu() {
-  const { chartType, setChartType } = useUi();
+  const { chartType } = useActiveChart();
+  const setChartType = useWorkspace((s) => s.setChartType);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -128,7 +146,7 @@ function ChartTypeIcon({ type }: { type: ChartType }) {
   }
 }
 
-function IconButton(props: { onClick(): void; title: string; pressed?: boolean; children: React.ReactNode }) {
+export function IconButton(props: { onClick(): void; title: string; pressed?: boolean; children: React.ReactNode }) {
   return (
     <button
       onClick={props.onClick}
@@ -142,6 +160,6 @@ function IconButton(props: { onClick(): void; title: string; pressed?: boolean; 
   );
 }
 
-function Divider() {
+export function Divider() {
   return <div className="mx-1 h-5 w-px shrink-0 bg-[var(--border)]" />;
 }

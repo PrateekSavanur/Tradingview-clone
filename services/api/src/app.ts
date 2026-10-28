@@ -1,12 +1,15 @@
 import type { MarketDataProvider } from '@chartdeck/data-providers';
 import { ProviderError } from '@chartdeck/data-providers';
-import { DrawingSet, TIMEFRAMES, isSymbolId, parseSymbolId, toTuple, type SymbolInfo } from '@chartdeck/shared';
+import {
+  DOC_NAME_RE, DOC_SCHEMAS, DrawingSet, MAX_DOCS_PER_KIND, SINGLETON_DOC_KINDS, TIMEFRAMES, isSymbolId, parseSymbolId, toTuple,
+  type DocKind, type SymbolInfo,
+} from '@chartdeck/shared';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Auth } from './auth.ts';
-import type { DrawingStore } from './db.ts';
+import type { DocStore, DrawingStore } from './db.ts';
 import type { HistoryService } from './history.ts';
 
 export interface AppDeps {
@@ -15,6 +18,7 @@ export interface AppDeps {
   /** Null when no database is configured; account features then answer 503. */
   auth: Auth | null;
   drawings: DrawingStore | null;
+  docs: DocStore | null;
   ready: () => Promise<boolean>;
   metrics: () => Promise<{ contentType: string; body: string }>;
   rateLimitPerMinute: number;
@@ -31,6 +35,15 @@ const HistoryQuery = z.object({
 
 const SymbolQuery = z.object({ symbol: z.string().refine(isSymbolId, 'invalid symbol id') });
 const DrawingsBody = z.object({ drawings: DrawingSet });
+const DocParams = z
+  .object({
+    kind: z.enum(Object.keys(DOC_SCHEMAS) as [DocKind, ...DocKind[]]),
+    name: z.string().regex(DOC_NAME_RE).optional(),
+  })
+  .refine((p) => p.name === undefined || !SINGLETON_DOC_KINDS.includes(p.kind) || p.name === 'current', {
+    message: 'this kind only has the document "current"',
+    path: ['name'],
+  });
 
 const SearchQuery = z.object({
   q: z.string().max(40).default(''),
@@ -94,8 +107,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     return { symbol: q.symbol, tf: q.tf, candles: res.candles.map(toTuple) };
   });
 
-  if (deps.auth && deps.drawings) {
-    const { auth, drawings } = deps;
+  if (deps.auth && deps.drawings && deps.docs) {
+    const { auth, drawings, docs } = deps;
     auth.register(app);
 
     app.get('/api/drawings', { preHandler: auth.requireUser }, async (req) => {
@@ -110,11 +123,36 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       const updatedAt = await drawings.put(req.user!.id, symbol, body.drawings);
       return { symbol, updatedAt };
     });
+
+    app.get('/api/docs/:kind', { preHandler: auth.requireUser }, async (req) => {
+      const { kind } = DocParams.parse(req.params);
+      return docs.list(req.user!.id, kind);
+    });
+
+    app.get('/api/docs/:kind/:name', { preHandler: auth.requireUser }, async (req, reply) => {
+      const { kind, name } = DocParams.parse(req.params);
+      const doc = await docs.get(req.user!.id, kind, name!);
+      return doc ?? reply.status(404).send({ error: 'not_found' });
+    });
+
+    app.put('/api/docs/:kind/:name', { preHandler: auth.requireUser, bodyLimit: 256 * 1024 }, async (req, reply) => {
+      const { kind, name } = DocParams.parse(req.params);
+      const data = DOC_SCHEMAS[kind].parse((req.body as { data?: unknown } | null)?.data);
+      const updatedAt = await docs.put(req.user!.id, kind, name!, data, MAX_DOCS_PER_KIND);
+      if (updatedAt === null) return reply.status(409).send({ error: 'limit_reached', message: `At most ${MAX_DOCS_PER_KIND} ${kind}` });
+      return { name, updatedAt };
+    });
+
+    app.delete('/api/docs/:kind/:name', { preHandler: auth.requireUser }, async (req, reply) => {
+      const { kind, name } = DocParams.parse(req.params);
+      return (await docs.delete(req.user!.id, kind, name!)) ? { ok: true } : reply.status(404).send({ error: 'not_found' });
+    });
   } else {
     const unavailable = async (_req: unknown, reply: { status(n: number): { send(b: unknown): unknown } }) =>
       reply.status(503).send({ error: 'accounts_unavailable', message: 'Accounts need DATABASE_URL to be configured' });
     app.all('/api/auth/*', unavailable);
     app.all('/api/drawings', unavailable);
+    app.all('/api/docs/*', unavailable);
   }
 
   return app;

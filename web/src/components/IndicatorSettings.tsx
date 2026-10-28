@@ -1,11 +1,18 @@
 import { INDICATOR_BY_ID, sanitizeInputs } from '@chartdeck/indicators';
 import { useEffect } from 'react';
-import { useIndicators } from '../store/indicators.ts';
+import { useIndicators, type IndicatorInstance } from '../store/indicators.ts';
+import { useWorkspace } from '../store/workspace.ts';
 
 /** Inputs and style for one indicator instance. Changes apply live. */
 export function IndicatorSettings() {
-  const { editing, edit, list, update, remove } = useIndicators();
-  const inst = list.find((i) => i.uid === editing);
+  const { editing, edit } = useIndicators();
+  const inst = useWorkspace((s) => (editing ? s.ws.charts[editing.chart]?.indicators.find((i) => i.uid === editing.uid) : undefined));
+  const chart = editing?.chart ?? 0;
+  const update = (uid: string, patch: Partial<Pick<IndicatorInstance, 'inputs' | 'plots'>>) => useWorkspace.getState().updateIndicator(chart, uid, patch);
+  const remove = (uid: string) => {
+    useWorkspace.getState().removeIndicator(chart, uid);
+    edit(null);
+  };
   const meta = inst && INDICATOR_BY_ID.get(inst.type);
 
   useEffect(() => {

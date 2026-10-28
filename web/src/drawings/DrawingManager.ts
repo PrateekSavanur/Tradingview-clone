@@ -54,6 +54,9 @@ const DRAG_CREATE_PX = 8;
 
 const newId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 
+/** Every live manager; charts showing the same symbol share one set of drawings. */
+const managers = new Set<DrawingManager>();
+
 /**
  * Owns every drawing on one chart: state, mouse/touch interaction, undo/redo and persistence.
  * Rendering happens in Lightweight Charts' own paint pass through a series primitive, so drawings
@@ -76,6 +79,10 @@ export class DrawingManager {
   private readonly listeners = new Set<(s: DrawingUiState) => void>();
   private series: ISeriesApi<SeriesType> | null = null;
   private readonly primitive: DrawingsPrimitive;
+  /** Takes keyboard shortcuts; only one chart in a layout is active. */
+  private active = true;
+  /** Drawings for `symbol` have been loaded, so peers may copy them. */
+  private loaded = false;
 
   constructor(private readonly host: DrawingHost) {
     this.primitive = new DrawingsPrimitive(this);
@@ -89,6 +96,7 @@ export class DrawingManager {
     c.addEventListener('mousedown', this.blockIfOwned, true);
     c.addEventListener('touchstart', this.blockIfOwned, true);
     window.addEventListener('keydown', this.onKey);
+    managers.add(this);
   }
 
   destroy(): void {
@@ -102,6 +110,33 @@ export class DrawingManager {
     c.removeEventListener('touchstart', this.blockIfOwned, true);
     window.removeEventListener('keydown', this.onKey);
     this.series?.detachPrimitive(this.primitive);
+    managers.delete(this);
+  }
+
+  setActive(active: boolean): void {
+    if (active === this.active) return;
+    this.active = active;
+    if (!active) {
+      this.tool = null;
+      this.draft = null;
+      this.selectedId = null;
+      this.changed(false);
+    }
+  }
+
+  /** Another loaded manager on the same symbol, whose drawings are the freshest in this tab. */
+  private peer(): DrawingManager | undefined {
+    for (const m of managers) if (m !== this && m.loaded && m.symbol === this.symbol) return m;
+    return undefined;
+  }
+
+  /** A peer on the same symbol changed its drawings. Our undo history no longer applies. */
+  private adopt(drawings: Drawing[]): void {
+    this.drawings = drawings;
+    if (!drawings.some((d) => d.id === this.selectedId)) this.selectedId = null;
+    this.history.clear();
+    this.primitive.requestUpdate();
+    this.emit();
   }
 
   /** (Re)attach to the main series; called when the chart type swaps the series. */
@@ -122,6 +157,7 @@ export class DrawingManager {
   async setSymbol(symbol: string): Promise<void> {
     if (symbol === this.symbol) return;
     this.symbol = symbol;
+    this.loaded = false;
     this.drawings = [];
     this.history.clear();
     this.draft = null;
@@ -150,10 +186,8 @@ export class DrawingManager {
       const loaded = await loadDrawings(symbol);
       if (seq !== this.loadSeq || symbol !== this.symbol || this.drag || this.draft || hasPendingSave(symbol)) return;
       if (JSON.stringify(loaded) === JSON.stringify(this.drawings)) return;
-      this.drawings = loaded;
-      if (!loaded.some((d) => d.id === this.selectedId)) this.selectedId = null;
-      this.history.clear();
-      this.changed(false);
+      this.adopt(loaded);
+      for (const m of managers) if (m !== this && m.symbol === symbol) m.adopt(loaded);
     } catch {
       // offline; try again next time
     }
@@ -164,9 +198,17 @@ export class DrawingManager {
     const symbol = this.symbol;
     if (!symbol) return;
     const seq = ++this.loadSeq;
+    // After sign-in/out every chart reloads from the new source, so peers may hold stale data then.
+    const peer = keepLocal ? this.peer() : undefined;
+    if (peer) {
+      this.loaded = true;
+      this.adopt(peer.drawings);
+      return;
+    }
     try {
       const loaded = await loadDrawings(symbol);
       if (seq !== this.loadSeq || symbol !== this.symbol) return;
+      this.loaded = true;
       const byId = new Map(loaded.map((d) => [d.id, d]));
       if (keepLocal) for (const d of this.drawings) byId.set(d.id, d);
       this.drawings = [...byId.values()];
@@ -575,7 +617,7 @@ export class DrawingManager {
 
   private readonly onKey = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement | null;
-    if (t?.closest('input, textarea, [contenteditable]') || this.editing) return;
+    if (!this.active || t?.closest('input, textarea, [contenteditable]') || this.editing) return;
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === 'Escape') {
       if (this.draft || this.tool) this.setTool(null);
@@ -620,7 +662,10 @@ export class DrawingManager {
   }
 
   private changed(persist: boolean): void {
-    if (persist && this.symbol) saveDrawings(this.symbol, this.drawings);
+    if (persist && this.symbol) {
+      saveDrawings(this.symbol, this.drawings);
+      for (const m of managers) if (m !== this && m.symbol === this.symbol) m.adopt(this.drawings);
+    }
     this.primitive.requestUpdate();
     this.emit();
   }
