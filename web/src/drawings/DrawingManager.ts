@@ -5,7 +5,7 @@ import type {
   PrimitiveHoveredItem, SeriesAttachedParameter, SeriesType, Time,
 } from 'lightweight-charts';
 import { History, TimeIndex, type Pt } from './geometry.ts';
-import { loadDrawings, saveDrawings } from './persistence.ts';
+import { hasPendingSave, loadDrawings, saveDrawings } from './persistence.ts';
 import { HIT_PX, TOOLS, type Viewport } from './tools.ts';
 
 export interface DrawingUiState {
@@ -136,6 +136,27 @@ export class DrawingManager {
   reload(): Promise<void> {
     this.selectedId = null;
     return this.load(false);
+  }
+
+  /**
+   * Pick up changes made on another device. Skipped mid-gesture or with unsaved local edits, so
+   * it never clobbers work in progress; the local undo history is dropped when remote data wins.
+   */
+  async refreshRemote(): Promise<void> {
+    const symbol = this.symbol;
+    if (!symbol || this.drag || this.draft || this.editing || hasPendingSave(symbol)) return;
+    const seq = ++this.loadSeq;
+    try {
+      const loaded = await loadDrawings(symbol);
+      if (seq !== this.loadSeq || symbol !== this.symbol || this.drag || this.draft || hasPendingSave(symbol)) return;
+      if (JSON.stringify(loaded) === JSON.stringify(this.drawings)) return;
+      this.drawings = loaded;
+      if (!loaded.some((d) => d.id === this.selectedId)) this.selectedId = null;
+      this.history.clear();
+      this.changed(false);
+    } catch {
+      // offline; try again next time
+    }
   }
 
   /** `keepLocal`: keep drawings made while the load was in flight (fresh symbol only). */

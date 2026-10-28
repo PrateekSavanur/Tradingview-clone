@@ -4,8 +4,8 @@ Real-time market charting. Raw exchange trades are streamed in, folded into OHLC
 every timeframe on the server, and pushed to the browser over a single WebSocket. Nothing on the
 live path polls.
 
-**Status:** Phase 1 (live chart) and Phase 3 (drawing tools, accounts) are done. Indicators,
-workspaces, alerts, scripting and paper trading are later phases.
+**Status:** Phases 1 (live chart), 2 (indicators) and 3 (drawing tools, accounts) are done.
+Workspaces, alerts, scripting and paper trading are next.
 
 ## Architecture
 
@@ -81,6 +81,45 @@ from its response headers.
 browser estimates the gateway clock offset from its min-RTT ping. The debug panel (pulse icon in
 the top bar) shows p50/p90/p99 per stage, including browser paint.
 
+### Indicators
+
+`packages/indicators` holds 28 indicators, written to Pine Script's conventions. That includes the
+seeding (EMA/RMA start from an SMA), Wilder smoothing, and direct ports of Pine's documented
+`ta.sar` and `ta.supertrend`. Server-side indicator alerts (Phase 5) will reuse the same package.
+
+| Category | Indicators |
+|---|---|
+| Moving averages | SMA, EMA, WMA, HMA, VWMA, VWAP (session/week/month anchored, σ bands) |
+| Bands & channels | Bollinger Bands, Keltner Channels, Donchian Channels |
+| Oscillators | RSI, MACD, Stochastic, Stochastic RSI, CCI, Williams %R, ROC, Momentum, Aroon |
+| Volume | OBV, MFI, Chaikin Money Flow, Volume Profile Visible Range (POC, 70% value area) |
+| Trend & volatility | ATR, DMI/ADX, Supertrend, Parabolic SAR, Ichimoku (cloud projected forward) |
+| Levels | Pivot Points (traditional, Fibonacci, Camarilla; auto/day/week/month) |
+
+**Incremental computation.** Each indicator is a step function over plain-data state. The
+`Runner` snapshots state once per new bar; a live tick that revises the open candle restores the
+snapshot and re-steps. Each tick therefore costs one step per indicator, whatever the history
+length. Full recomputation happens only when history itself changes: load, scroll-back, backfill
+or timeframe switch.
+
+**On the chart.**
+- Overlays share the price scale. Oscillators get their own resizable panes, with reference
+  levels and shaded bands.
+- Fills (Bollinger, Ichimoku cloud with bull/bear colouring) and the volume profile are drawn by
+  series primitives.
+- Add an indicator with the **fx Indicators** button or `/`. Add the same one several times with
+  different inputs if you like.
+- Legend rows show values at the crosshair, with hide, settings and remove controls. Inputs and
+  styles apply live without moving the indicator's pane.
+- The indicator set persists in the browser and applies to every symbol.
+
+**Verification.**
+- 15 indicators are checked against the independent `technicalindicators` library: SMA, EMA,
+  WMA, RSI, Bollinger, MACD, Stochastic, ATR, CCI, %R, MFI, ROC, OBV, ADX, Parabolic SAR.
+- The rest have hand-computed cases.
+- All 27 bar-based indicators pass a property test: streaming each bar as several live revisions
+  must produce exactly the full batch result.
+
 ### Drawing tools
 
 | Group | Tools |
@@ -103,10 +142,13 @@ the top bar) shows p50/p90/p99 per stage, including browser paint.
   also extend into the future, past the last bar.
 - **Rendering** uses a Lightweight Charts series primitive, in the chart's own paint pass. It
   can't lag behind pan or zoom, and axis labels show for the selected drawing's anchors.
-- **Persistence.** Signed out, drawings stay in this browser's localStorage. Signed in, they are
-  stored per user per symbol in Postgres. Drawings made while signed out are moved into the
-  account on sign-in. Saves are debounced; payloads are validated on both ends against the shared
-  `Drawing` schema (max 500 drawings per symbol).
+- **Persistence.** Signed out, drawings stay in this browser's localStorage, so they're per
+  device. Signed in, they are stored per user per symbol in Postgres and follow you to any device.
+  Drawings made while signed out are moved into the account on sign-in.
+- **Cross-device refresh.** A signed-in tab re-reads from the server when it regains focus and
+  every 30 s while visible. It never does so mid-gesture or over unsaved edits.
+- **Saves** are debounced, and payloads are validated on both ends against the shared `Drawing`
+  schema (max 500 drawings per symbol).
 
 ### Accounts
 
@@ -240,8 +282,11 @@ open, needs session-aware bucketing there. That's planned with the NSE adapter.
   DST change are labelled one hour off. Daily and longer bars are always on UTC dates.
 - **Scroll-back to listing date**: the deepest page is shorter than the page size, so it is never
   served from cache and always goes to the provider.
-- **Drawings sync is last-write-wins per symbol.** Two tabs editing the same symbol at once can
-  overwrite each other's latest change. There is no live cross-tab sync yet.
+- **Drawing sync is last-write-wins per symbol**, refreshed on focus and every 30 s rather than
+  pushed live. Two devices editing the same symbol within the same window can overwrite each
+  other's latest change.
+- **Indicator sets** are saved per browser for now. Saved layouts, synced to the account, come
+  with Phase 4.
 - **No password reset or email verification.** Both need an outbound mail service, which comes
   with email alerts (Phase 5).
 - **Drawings on very different timeframes.** A 1-minute-precise anchor viewed on 1W is placed

@@ -4,6 +4,8 @@ import {
   type IChartApi, type ISeriesApi, type LogicalRange, type MouseEventParams, type SeriesType, type Time,
 } from 'lightweight-charts';
 import { DrawingManager } from '../drawings/DrawingManager.ts';
+import type { IndicatorInstance } from '../store/indicators.ts';
+import { IndicatorLayer, type IndicatorLegendItem } from './IndicatorLayer.ts';
 import { getHistory } from '../lib/api.ts';
 import type { CandleEvent, Feed } from '../lib/feed.ts';
 import { decimalsFor, formatBarTime, formatPrice, formatVolume } from '../lib/format.ts';
@@ -17,6 +19,7 @@ export interface LegendData {
   prevClose: number | undefined;
   /** True when showing the latest bar rather than one under the crosshair. */
   live: boolean;
+  indicators: IndicatorLegendItem[];
 }
 
 export interface ChartStatus {
@@ -62,6 +65,7 @@ export class ChartController {
 
   readonly latency = new LatencyTracker();
   readonly drawings: DrawingManager;
+  readonly indicators: IndicatorLayer;
   status: ChartStatus = { loading: false, loadingOlder: false, reachedStart: false, error: null, bars: 0 };
 
   constructor(container: HTMLElement, private readonly feed: Feed, opts: { chartType: ChartType; theme: Theme }) {
@@ -107,6 +111,7 @@ export class ChartController {
       textColor: () => this.palette.text,
     });
     this.drawings.attach(this.main);
+    this.indicators = new IndicatorLayer(this.chart, this.main, () => this.tf);
 
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(this.onRangeChange);
     this.chart.subscribeCrosshairMove(this.onCrosshair);
@@ -139,8 +144,10 @@ export class ChartController {
     if (this.symbol?.id === symbol.id && this.tf === tf) return;
     // Drawings are per symbol and shared by every timeframe.
     if (this.symbol?.id !== symbol.id) void this.drawings.setSymbol(symbol.id);
+    const tfChanged = this.tf !== tf;
     this.symbol = symbol;
     this.tf = tf;
+    if (tfChanged) this.indicators.onTimeframeChange();
     const precision = decimalsFor(symbol.tickSize);
     this.main.applyOptions({ priceFormat: { type: 'price', precision, minMove: symbol.tickSize } });
     this.chart.applyOptions({ timeScale: { timeVisible: TF_MS[tf] < TF_MS['1D'], secondsVisible: tf === '1s' } });
@@ -155,8 +162,22 @@ export class ChartController {
     this.main = this.createMainSeries();
     this.main.applyOptions({ priceFormat: old.options().priceFormat });
     this.drawings.attach(this.main);
+    this.indicators.setMain(this.main);
     this.chart.removeSeries(old);
     this.renderAll();
+  }
+
+  setIndicators(list: IndicatorInstance[]): void {
+    this.indicators.sync(list);
+    this.scheduleLegend();
+  }
+
+  /** Top edge of a pane in chart-container pixels (panes are separated by 1px). */
+  paneTop(index: number): number {
+    const panes = this.chart.panes();
+    let y = 0;
+    for (let j = 0; j < index && j < panes.length; j++) y += panes[j]!.getHeight() + 1;
+    return y;
   }
 
   setTheme(theme: Theme): void {
@@ -397,6 +418,7 @@ export class ChartController {
     }
     this.main.setData(main);
     this.volume.setData(vol);
+    this.indicators.recompute(this.bars);
     this.setStatus({ bars: n });
     this.scheduleLegend();
   }
@@ -409,6 +431,7 @@ export class ChartController {
     }
     this.main.update(this.point(i) as never);
     this.volume.update(this.volumePoint(i));
+    this.indicators.update(this.bars);
     if (this.status.bars !== this.bars.length) this.setStatus({ bars: this.bars.length });
   }
 
@@ -437,7 +460,10 @@ export class ChartController {
       if (i < 0) i = n - 1;
     }
     if (this.chartType === 'heikin' && this.ha.length !== n) this.ha = heikinAshi(this.bars);
-    return { bar: this.displayBar(i), prevClose: i > 0 ? this.displayBar(i - 1).close : undefined, live: i === n - 1 && time === null };
+    return {
+      bar: this.displayBar(i), prevClose: i > 0 ? this.displayBar(i - 1).close : undefined, live: i === n - 1 && time === null,
+      indicators: this.indicators.legendAt(i),
+    };
   }
 
   private indexOf(time: number): number {

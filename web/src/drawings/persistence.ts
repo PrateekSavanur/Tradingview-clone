@@ -53,6 +53,9 @@ export async function loadDrawings(symbol: string): Promise<Drawing[]> {
   return useAuth.getState().user ? fetchRemote(symbol) : readLocal(symbol);
 }
 
+/** True while a save for this symbol is waiting on its debounce or retry. */
+export const hasPendingSave = (symbol: string) => pending.has(symbol);
+
 export function saveDrawings(symbol: string, drawings: Drawing[]): void {
   const prev = pending.get(symbol);
   if (prev) window.clearTimeout(prev.timer);

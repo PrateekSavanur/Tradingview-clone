@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { ChartController, type ChartStatus, type LegendData } from '../chart/ChartController.ts';
 import { feed } from '../lib/feed.ts';
 import { useUi } from '../store/ui.ts';
+import { decimalsFor } from '../lib/format.ts';
+import { useIndicators } from '../store/indicators.ts';
+import { IndicatorLegend } from './IndicatorLegend.tsx';
 import { Legend } from './Legend.tsx';
 import { SelectionToolbar } from './SelectionToolbar.tsx';
 import { TextEditor } from './TextEditor.tsx';
@@ -12,6 +15,7 @@ export function ChartView({ onController }: { onController(c: ChartController | 
   const [legend, setLegend] = useState<LegendData | null>(null);
   const [status, setStatus] = useState<ChartStatus | null>(null);
   const { symbol, tf, chartType, theme, openSearch } = useUi();
+  const indicatorList = useIndicators((s) => s.list);
 
   useEffect(() => {
     const { chartType, theme } = useUi.getState();
@@ -32,6 +36,7 @@ export function ChartView({ onController }: { onController(c: ChartController | 
   useEffect(() => ctl?.setSymbol(symbol, tf), [ctl, symbol, tf]);
   useEffect(() => ctl?.setChartType(chartType), [ctl, chartType]);
   useEffect(() => ctl?.setTheme(theme), [ctl, theme]);
+  useEffect(() => ctl?.setIndicators(indicatorList), [ctl, indicatorList]);
 
   // Typing a letter or digit on the chart opens symbol search, prefilled.
   useEffect(() => {
@@ -53,6 +58,7 @@ export function ChartView({ onController }: { onController(c: ChartController | 
     <div className="relative min-h-0 flex-1">
       <div ref={el} className="absolute inset-0" />
       <Legend symbol={symbol} tf={tf} data={legend} />
+      <IndicatorLegend items={legend?.indicators ?? []} controller={ctl} priceDecimals={decimalsFor(symbol.tickSize)} />
       <SelectionToolbar controller={ctl} />
       <TextEditor controller={ctl} />
       {status?.loading && <Overlay>Loading {symbol.ticker}…</Overlay>}

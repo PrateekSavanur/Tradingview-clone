@@ -1,6 +1,7 @@
 import { TIMEFRAMES } from '@chartdeck/shared';
 import { useEffect, useRef, useState } from 'react';
 import type { ChartController } from '../chart/ChartController.ts';
+import { useIndicators } from '../store/indicators.ts';
 import { CHART_TYPES, CHART_TYPE_LABELS, useUi, type ChartType } from '../store/ui.ts';
 import { AuthMenu } from './AuthMenu.tsx';
 import { StatusIndicator } from './StatusIndicator.tsx';
@@ -36,6 +37,15 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
       </nav>
       <Divider />
       <ChartTypeMenu />
+      <Divider />
+      <button
+        onClick={() => useIndicators.getState().openPicker(true)}
+        className="flex h-8 shrink-0 items-center gap-1.5 rounded px-2 text-[13px] hover:bg-[var(--hover)]"
+        title="Indicators (/)"
+      >
+        <span className="font-serif text-[15px] italic leading-none">fx</span>
+        <span className="hidden lg:inline">Indicators</span>
+      </button>
       <div className="flex-1" />
       <StatusIndicator controller={controller} />
       <IconButton onClick={toggleDebug} pressed={debugOpen} title="Latency debug panel">

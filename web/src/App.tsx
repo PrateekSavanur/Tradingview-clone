@@ -3,6 +3,8 @@ import type { ChartController } from './chart/ChartController.ts';
 import { ChartView } from './components/ChartView.tsx';
 import { DebugPanel } from './components/DebugPanel.tsx';
 import { DrawingToolbar } from './components/DrawingToolbar.tsx';
+import { IndicatorPicker } from './components/IndicatorPicker.tsx';
+import { IndicatorSettings } from './components/IndicatorSettings.tsx';
 import { SymbolSearch } from './components/SymbolSearch.tsx';
 import { TopBar } from './components/TopBar.tsx';
 import { importLocalDrawings } from './drawings/persistence.ts';
@@ -22,6 +24,21 @@ export function App() {
   useEffect(() => {
     document.title = `${symbol.ticker} · ChartDeck`;
   }, [symbol.ticker]);
+
+  // Drawings changed on another device show up when this tab regains focus, and every 30 s while visible.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible' && useAuth.getState().user) void controller?.drawings.refreshRemote();
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    const t = window.setInterval(refresh, 30_000);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+      window.clearInterval(t);
+    };
+  }, [controller]);
 
   // Signing in moves signed-out drawings into the account; any sign-in/out switches the drawing source.
   useEffect(
@@ -52,6 +69,8 @@ export function App() {
         </a>
       </footer>
       <SymbolSearch />
+      <IndicatorPicker />
+      <IndicatorSettings />
     </div>
   );
 }

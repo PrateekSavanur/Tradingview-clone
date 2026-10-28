@@ -14,7 +14,8 @@ export function StatusIndicator({ controller }: { controller: ChartController | 
   const [p50, setP50] = useState<number | null>(null);
 
   useEffect(() => {
-    const t = window.setInterval(() => setP50(controller?.latency.stats()?.total.p50 ?? null), 1000);
+    // A median over a handful of samples is noise (e.g. a symbol's first frame after seeding).
+    const t = window.setInterval(() => setP50(controller && controller.latency.count >= 10 ? (controller.latency.stats()?.total.p50 ?? null) : null), 1000);
     return () => window.clearInterval(t);
   }, [controller]);
 

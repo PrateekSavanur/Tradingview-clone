@@ -6,6 +6,7 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/data-providers/package.json packages/data-providers/
 COPY packages/candle-aggregator/package.json packages/candle-aggregator/
 COPY packages/service-kit/package.json packages/service-kit/
+COPY packages/indicators/package.json packages/indicators/
 COPY services/ingest/package.json services/ingest/
 COPY services/ws-gateway/package.json services/ws-gateway/
 COPY services/api/package.json services/api/
