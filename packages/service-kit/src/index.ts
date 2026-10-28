@@ -83,3 +83,4 @@ export function onShutdown(log: Logger, fn: () => Promise<void> | void): void {
   process.on('SIGTERM', handler);
   process.on('SIGINT', handler);
 }
+export * from './mailer.ts';

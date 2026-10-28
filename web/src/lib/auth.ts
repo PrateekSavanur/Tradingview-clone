@@ -3,6 +3,8 @@ import { create } from 'zustand';
 export interface User {
   id: string;
   email: string;
+  /** Alert emails only go to confirmed addresses. */
+  emailVerified: boolean;
 }
 
 interface AuthState {
@@ -102,6 +104,37 @@ export async function signIn(mode: 'login' | 'register', email: string, password
     throw new AuthError(body.issues?.[0]?.message ?? body.message ?? (res.status === 429 ? 'Too many attempts, try again in a minute' : 'Sign-in failed'));
   }
   startSession(body);
+}
+
+async function postJson(path: string, body: unknown, auth = false): Promise<void> {
+  const init: RequestInit = { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
+  const res = await (auth ? authFetch(path, init) : fetch(path, init));
+  if (!res.ok) {
+    const b = (await res.json().catch(() => ({}))) as { message?: string; issues?: Array<{ message: string }> };
+    throw new AuthError(b.issues?.[0]?.message ?? b.message ?? (res.status === 429 ? 'Too many attempts, try again later' : 'Something went wrong'));
+  }
+}
+
+/** Re-read the user, e.g. after confirming the email in another tab. */
+export async function reloadUser(): Promise<void> {
+  if (!useAuth.getState().user) return;
+  const res = await authFetch('/api/auth/me');
+  if (res.ok) useAuth.setState({ user: ((await res.json()) as { user: User }).user });
+}
+
+export const sendVerification = () => postJson('/api/auth/verify/send', {}, true);
+
+export async function verifyEmail(token: string): Promise<void> {
+  await postJson('/api/auth/verify', { token });
+  await reloadUser();
+}
+
+export const requestPasswordReset = (email: string) => postJson('/api/auth/password/forgot', { email });
+
+/** Every session is signed out by a reset, this one included. */
+export async function resetPassword(token: string, password: string): Promise<void> {
+  await postJson('/api/auth/password/reset', { token, password });
+  endSession();
 }
 
 export async function signOut(): Promise<void> {

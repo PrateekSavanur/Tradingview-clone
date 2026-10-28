@@ -1,9 +1,11 @@
 import { createProviders } from '@chartdeck/data-providers';
 import { randomBytes } from 'node:crypto';
-import { createLogger, env, envInt, initMetrics, onShutdown } from '@chartdeck/service-kit';
+import { createLogger, env, envInt, initMetrics, mailerFromEnv, onShutdown } from '@chartdeck/service-kit';
+import { Redis } from 'ioredis';
+import { AlertBus } from './alert-bus.ts';
 import { buildApp } from './app.ts';
 import { Auth } from './auth.ts';
-import { CandleStore, Database, DocStore, DrawingStore, UserStore } from './db.ts';
+import { AlertStore, CandleStore, Database, DocStore, DrawingStore, UserStore } from './db.ts';
 import { HistoryService } from './history.ts';
 
 const log = createLogger('api');
@@ -43,14 +45,33 @@ if (!jwtSecret) {
   throw new Error('JWT_SECRET must be at least 32 characters');
 }
 const allowedOrigins = env('ALLOWED_ORIGINS', 'http://localhost:5173,http://localhost:3000').split(',').map((s) => s.trim());
-const auth = db
+const users = db && new UserStore(db);
+const auth = users
   ? new Auth({
-      users: new UserStore(db),
+      users,
       jwtSecret: new TextEncoder().encode(jwtSecret),
       allowedOrigins,
       secureCookies: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : undefined,
+      mailer: mailerFromEnv(log),
+      // Links in emails; defaults to the first allowed origin.
+      publicUrl: process.env.PUBLIC_URL || allowedOrigins.find((o) => o !== '*') || 'http://localhost:5173',
     })
   : null;
+
+// Alerts need Redis to reach the alerts service and every api replica's open streams.
+let redis: Redis | null = null;
+let redisSub: Redis | null = null;
+let alertBus: AlertBus | null = null;
+if (db && process.env.REDIS_URL) {
+  redis = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+  redisSub = new Redis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+  redis.on('error', (err) => log.error({ err }, 'redis error'));
+  redisSub.on('error', (err) => log.error({ err }, 'redis subscriber error'));
+  alertBus = new AlertBus(redis, redisSub);
+  await alertBus.start();
+} else if (db) {
+  log.warn('REDIS_URL not set; alerts are disabled');
+}
 
 const app = await buildApp({
   providers,
@@ -58,9 +79,11 @@ const app = await buildApp({
   auth,
   drawings: db && new DrawingStore(db),
   docs: db && new DocStore(db),
-  ready: async () => (db ? db.ping() : true),
+  alerts: db && users && alertBus ? { store: new AlertStore(db), users, bus: alertBus } : null,
+  ready: async () => (db ? db.ping() : true) && (!redis || redis.status === 'ready'),
   metrics: async () => ({ contentType: registry.contentType, body: await registry.metrics() }),
   rateLimitPerMinute: envInt('API_RATE_LIMIT_PER_MIN', 300),
+  internalToken: process.env.INTERNAL_TOKEN || undefined,
   trustProxy: process.env.TRUST_PROXY === 'true',
   logger: { level: process.env.LOG_LEVEL ?? 'info' },
 });
@@ -69,5 +92,5 @@ await app.listen({ port: envInt('API_PORT', 8081), host: '0.0.0.0' });
 
 onShutdown(log, async () => {
   await app.close();
-  await db?.close();
+  await Promise.allSettled([db?.close(), redis?.quit(), redisSub?.quit()]);
 });

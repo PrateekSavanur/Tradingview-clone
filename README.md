@@ -4,8 +4,8 @@ Real-time market charting. Raw exchange trades are streamed in, folded into OHLC
 every timeframe on the server, and pushed to the browser over a single WebSocket. Nothing on the
 live path polls.
 
-**Status:** Phases 1 (live chart), 2 (indicators), 3 (drawing tools, accounts) and 4 (workspaces)
-are done. Alerts, scripting and paper trading are next.
+**Status:** Phases 1 (live chart), 2 (indicators), 3 (drawing tools, accounts), 4 (workspaces)
+and 5 (alerts, email) are done. Scripting and paper trading are next.
 
 ## Architecture
 
@@ -28,7 +28,12 @@ flowchart LR
   end
   subgraph api["api (N replicas)"]
     HIST[history + search]
+    SSE[alert streams<br/>SSE per user]
   end
+  subgraph alerts["alerts (1 replica)"]
+    EVAL[alert evaluator<br/>price + indicators]
+  end
+  MAIL[SMTP]
   TS[(TimescaleDB<br/>closed candles)]
   WEB[web<br/>React + Lightweight Charts]
 
@@ -44,6 +49,12 @@ flowchart LR
   WEB -- /api/history, /api/symbols --> HIST
   HIST <--> TS
   HIST --> BREST
+  CH --> EVAL
+  EVAL -- symbols with alerts --> DEM
+  EVAL -- warm-up history --> HIST
+  EVAL -- fired --> SSE
+  SSE == server-sent events ==> WEB
+  EVAL --> MAIL
 ```
 
 **Live path.** `ingest` keeps one combined-stream WebSocket per provider and subscribes to
@@ -163,7 +174,42 @@ or timeframe switch.
   email exists.
 - **Rate limits.** Register and login are limited to 10/min per IP.
 - **Origin checks.** Cookie-authenticated endpoints reject foreign `Origin`s.
-- `GET/PUT /api/drawings?symbol=` and `/api/docs/*` need `Authorization: Bearer`.
+- **Email.** New accounts get a confirmation link (24 h, single use). Alert emails only go to
+  confirmed addresses, so nobody can point alert mail at someone else's inbox.
+  `POST /api/auth/password/forgot` emails a reset link (1 h, single use). It answers the same
+  whether or not the account exists, and doesn't wait on SMTP, so it can't be used to probe for
+  emails. Resetting signs out every session and also confirms the address. Only token hashes are
+  stored. Mail goes out over `SMTP_URL`; without it, messages and their links are written to the
+  log.
+- `GET/PUT /api/drawings?symbol=`, `/api/docs/*` and `/api/alerts*` need `Authorization: Bearer`.
+
+### Alerts
+
+- **Conditions.** Price or any indicator plot is compared with a value, the price, or another plot
+  of the chart's indicators. The operators are crossing, crossing up/down, greater than and less
+  than, on any timeframe. Crossings follow Pine's `ta.crossover`/`ta.crossunder`. Plots drawn
+  shifted in time (Ichimoku spans) and the volume profile can't be alerted on. The server
+  validates every condition against the indicator catalogue and clamps inputs the way the chart
+  does.
+- **Triggers.** *Only once* stops after firing. *Once per bar* fires intrabar, at most once per
+  bar. *Once per bar close* only compares closed bars, so a spike that reverses before the close
+  doesn't count. Expiry is between 1 day and 1 year, or never. Each user can have up to 100 alerts.
+- **Evaluation** (`services/alerts`, `packages/alert-engine`). The service adds the symbols it
+  needs to the same Redis demand sets the gateways use, so ingest streams them even with no
+  browser open. It listens on the candle channels and keeps one incremental `Runner` per
+  indicator configuration, so a tick costs one step. Indicators are warmed up with 1000 bars from
+  the api (`INTERNAL_TOKEN` exempts these calls from rate limiting). When the provider epoch
+  changes, it warms up again. Creating, editing, pausing or deleting an alert notifies the
+  service through Redis. It also reloads from the database every 5 minutes and sweeps expiries
+  every 15 s.
+- **Delivery.** Each firing is logged (the last 500 per user are kept), then sent to the user's
+  open tabs by any api replica over server-sent events (`GET /api/alerts/stream`). The tab shows
+  a toast, and a desktop notification if the user allowed them and the tab is in the background.
+  With *email* on, an email goes out too, capped at 30 per user per hour. Active price-level
+  alerts are drawn as dashed lines on the chart. Create one from the top bar, the Alerts panel,
+  or Alt+A.
+
+### Workspaces
 
 ### Workspaces
 
@@ -199,15 +245,19 @@ packages/
   shared/             wire protocol, timeframes + bucket math, symbol ids (used by server and browser)
   data-providers/     MarketDataProvider interface; binance (REST + WS) and mock adapters
   candle-aggregator/  trades -> open candle for every timeframe; seeding; empty-interval roll-over
-  service-kit/        logging (pino), env parsing, /healthz /readyz /metrics
+  service-kit/        logging (pino), env parsing, /healthz /readyz /metrics, mailer (SMTP or log)
+  indicators/         28 indicators as incremental step functions; catalogue (inputs, plots)
+  alert-engine/       alert validation, descriptions, and the evaluator (crossings, trigger rules)
 services/
   ingest/             upstream streams -> aggregator -> Redis
   ws-gateway/         client WebSockets, fan-out, backpressure, rate limits, demand registry
-  api/                history (read-through TimescaleDB cache) and symbol search
+  api/                history (read-through TimescaleDB cache), symbol search, accounts, documents,
+                      alerts CRUD + per-user SSE streams
+  alerts/             evaluates alerts on the live stream; logs, pushes and emails fired alerts
 web/                  React + Vite + Zustand + Tailwind; ChartController owns Lightweight Charts,
                       drawings/ holds the drawing engine (tools, DrawingManager, persistence)
 deploy/               Dockerfiles, nginx, k8s (kustomize), Prometheus, Grafana dashboard
-test/integration/     end-to-end WebSocket flow against real processes + Redis
+test/integration/     WebSocket flow against real processes; accounts, docs and alerts against Postgres + Redis
 scripts/              build, dev runner, latency probe
 ```
 
@@ -229,8 +279,12 @@ http://localhost:3001 and the *ChartDeck · Live data pipeline* dashboard is pro
 ```sh
 npm install
 docker compose up -d redis timescale   # Redis on 127.0.0.1:56379, Postgres on 127.0.0.1:55432
-npm run dev                            # ingest, ws-gateway, api and Vite on http://localhost:5173
+npm run dev                            # ingest, ws-gateway, api, alerts and Vite on http://localhost:5173
 ```
+
+Emails (confirmation, password reset, alerts) are written to the dev log unless `SMTP_URL` is set.
+`docker compose --profile mail up -d mailpit` with `SMTP_URL=smtp://localhost:1025` delivers them
+to a local inbox at http://localhost:8025 instead.
 
 If Binance is blocked on your network, set `BINANCE_REST_URL=https://data-api.binance.vision`
 and `BINANCE_WS_URL=wss://data-stream.binance.vision`. To work fully offline, set
@@ -241,9 +295,11 @@ and `BINANCE_WS_URL=wss://data-stream.binance.vision`. To work fully offline, se
 ```sh
 npm test                    # unit: aggregation, bucket math, history cache, HA/hollow, backpressure, Binance mapping,
                             #       drawing math (fib levels, R:R, measure, hit-testing, time mapping, undo),
-                            #       workspace model (layouts, linking, normalising saved layouts)
-npm run test:integration    # WS flow (ingest + ws-gateway, mock provider, Redis :56379) and
-                            # accounts/drawings/docs (Postgres :55432)
+                            #       workspace model (layouts, linking, normalising saved layouts),
+                            #       alert engine (crossings, trigger frequencies, indicator alerts, validation)
+npm run test:integration    # WS flow (ingest + ws-gateway, mock provider, Redis :56379),
+                            # accounts/drawings/docs, email verification/reset, alerts API, and the
+                            # alerts service end to end: demand, firing, SSE push, email (Postgres :55432)
 npm run typecheck
 ```
 
@@ -259,7 +315,7 @@ node scripts/latency-probe.mjs ws://localhost:3000/ws binance:BTCUSDT 1s 30   # 
 ### Kubernetes (k3s)
 
 ```sh
-for s in ingest ws-gateway api; do
+for s in ingest ws-gateway api alerts; do
   docker build -f deploy/docker/service.Dockerfile --build-arg SERVICE=$s -t <registry>/chartdeck/$s:0.1.0 .
 done
 docker build -f deploy/docker/web.Dockerfile -t <registry>/chartdeck/web:0.1.0 .
@@ -267,12 +323,15 @@ docker build -f deploy/docker/web.Dockerfile -t <registry>/chartdeck/web:0.1.0 .
 
 kubectl create namespace chartdeck
 kubectl -n chartdeck create secret generic chartdeck-db --from-literal=password="$(openssl rand -base64 24)"
-kubectl -n chartdeck create secret generic chartdeck-auth --from-literal=jwt-secret="$(openssl rand -base64 48)"
+kubectl -n chartdeck create secret generic chartdeck-auth --from-literal=jwt-secret="$(openssl rand -base64 48)" \
+  --from-literal=internal-token="$(openssl rand -hex 32)"
+kubectl -n chartdeck create secret generic chartdeck-mail --from-literal=smtp-url='smtps://user:pass@smtp.example.com:465'
 # edit ALLOWED_ORIGINS in deploy/k8s/config.yaml and the host in deploy/k8s/ingress.yaml
 kubectl apply -k deploy/k8s
 ```
 
-`ingest` must stay at exactly one replica, since two would publish every candle twice. Gateways
+`ingest` and `alerts` must each stay at exactly one replica: two ingests would publish every candle
+twice, and two alert services would fire every alert twice. Gateways
 and the API scale horizontally. Pods carry `prometheus.io/*` scrape annotations.
 
 ## Adding a data provider
@@ -316,7 +375,10 @@ open, needs session-aware bucketing there. That's planned with the NSE adapter.
 - **Workspace sync is last-write-wins** like drawings: two devices open at once each save their
   own layout, and the account keeps whichever saved last. A device picks up the other's workspace
   when it next loads or signs in, not live.
-- **No password reset or email verification.** Both need an outbound mail service, which comes
-  with email alerts (Phase 5).
+- **Alerts don't catch up.** Conditions are evaluated on live updates only. A crossing that
+  happens while the alerts service is down, or between two published updates (≤25 ms apart), is
+  not seen, and *once per bar close* uses the last published state of the bar. The service runs
+  as one replica, like ingest.
+- **Changing your email address** isn't supported yet.
 - **Drawings on very different timeframes.** A 1-minute-precise anchor viewed on 1W is placed
   proportionally inside its week bar, but time snapping while editing there rounds it to a bar.

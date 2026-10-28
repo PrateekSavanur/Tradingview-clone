@@ -131,6 +131,16 @@ export class IndicatorLayer {
     return items;
   }
 
+  /** Latest output of every instance, by uid (the open bar's values). */
+  latest(): Map<string, Output> {
+    const m = new Map<string, Output>();
+    for (const [uid, l] of this.live) {
+      const out = l.outputs[l.outputs.length - 1];
+      if (out) m.set(uid, out);
+    }
+    return m;
+  }
+
   destroyAll(): void {
     for (const l of this.live.values()) this.destroy(l);
   }

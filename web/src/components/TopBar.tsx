@@ -1,6 +1,7 @@
 import { TIMEFRAMES } from '@chartdeck/shared';
 import { useEffect, useRef, useState } from 'react';
 import type { ChartController } from '../chart/ChartController.ts';
+import { useAlerts } from '../store/alerts.ts';
 import { useIndicators } from '../store/indicators.ts';
 import { CHART_TYPES, CHART_TYPE_LABELS, useUi, type ChartType } from '../store/ui.ts';
 import { useActiveChart, useWorkspace } from '../store/workspace.ts';
@@ -9,7 +10,8 @@ import { LayoutMenu } from './LayoutMenu.tsx';
 import { StatusIndicator } from './StatusIndicator.tsx';
 
 export function TopBar({ controller }: { controller: ChartController | null }) {
-  const { theme, toggleTheme, toggleDebug, debugOpen, openSearch, watchlistOpen, toggleWatchlist } = useUi();
+  const { theme, toggleTheme, toggleDebug, debugOpen, openSearch, sidePanel, toggleSidePanel } = useUi();
+  const unread = useAlerts((s) => s.unread);
   const { symbol, tf, logScale = false } = useActiveChart();
   const { setTf, setLogScale } = useWorkspace.getState();
   return (
@@ -51,6 +53,14 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
         <span className="hidden lg:inline">Indicators</span>
       </button>
       <button
+        onClick={() => useAlerts.getState().openCreate()}
+        className="flex h-8 shrink-0 items-center gap-1.5 rounded px-2 text-[13px] hover:bg-[var(--hover)]"
+        title="Create alert (Alt+A)"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="12" cy="13" r="7" /><path d="M12 10v3l2 2M5 4 2.5 6.5M19 4l2.5 2.5" /></svg>
+        <span className="hidden lg:inline">Alert</span>
+      </button>
+      <button
         onClick={() => setLogScale(!logScale)}
         aria-pressed={logScale}
         className={`h-8 shrink-0 rounded px-2 text-[13px] hover:bg-[var(--hover)] ${logScale ? 'font-semibold text-[var(--accent)]' : ''}`}
@@ -65,7 +75,13 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
       <IconButton onClick={toggleDebug} pressed={debugOpen} title="Latency debug panel">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
       </IconButton>
-      <IconButton onClick={toggleWatchlist} pressed={watchlistOpen} title="Watchlist">
+      <IconButton onClick={() => toggleSidePanel('alerts')} pressed={sidePanel === 'alerts'} title={unread ? `Alerts (${unread} new)` : 'Alerts'}>
+        <span className="relative">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 8a6 6 0 1112 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 003.4 0" /></svg>
+          {unread > 0 && <span className="absolute -right-1.5 -top-1.5 min-w-3.5 rounded-full bg-[var(--color-down)] px-0.5 text-center text-[9px] font-semibold leading-3.5 text-white">{unread > 9 ? '9+' : unread}</span>}
+        </span>
+      </IconButton>
+      <IconButton onClick={() => toggleSidePanel('watchlist')} pressed={sidePanel === 'watchlist'} title="Watchlist">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
       </IconButton>
       <IconButton onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>

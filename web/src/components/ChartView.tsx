@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChartController, type ChartStatus, type LegendData } from '../chart/ChartController.ts';
 import { feed } from '../lib/feed.ts';
 import { decimalsFor } from '../lib/format.ts';
+import { useAlerts } from '../store/alerts.ts';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
 import { IndicatorLegend } from './IndicatorLegend.tsx';
@@ -43,6 +44,18 @@ export function ChartView({ index, onController }: { index: number; onController
   useEffect(() => ctl?.setIndicators(indicators), [ctl, indicators]);
   useEffect(() => ctl?.setLogScale(logScale), [ctl, logScale]);
   useEffect(() => ctl?.setActive(active), [ctl, active]);
+
+  // Active price-level alerts on this symbol show as dashed lines on the price scale.
+  const alerts = useAlerts((s) => s.alerts);
+  useEffect(() => {
+    ctl?.setAlertLevels(
+      alerts.flatMap((a) =>
+        a.status === 'active' && a.symbol.id === symbol.id && a.source.kind === 'price' && a.target.kind === 'value'
+          ? [{ price: a.target.value, title: `⏰ ${a.tf}` }]
+          : [],
+      ),
+    );
+  }, [ctl, alerts, symbol.id]);
 
   return (
     <div className="relative min-h-0 min-w-0 bg-[var(--bg)]" onPointerDownCapture={() => setActive(index)}>

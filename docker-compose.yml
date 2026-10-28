@@ -7,6 +7,14 @@ x-service-env: &service-env
   BINANCE_WS_URL: ${BINANCE_WS_URL:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}
 
+# Email (verification, password reset, alert emails). Without SMTP_URL mail is only logged;
+# `docker compose --profile mail up` adds Mailpit and SMTP_URL=smtp://mailpit:1025 uses it.
+x-mail-env: &mail-env
+  SMTP_URL: ${SMTP_URL:-}
+  MAIL_FROM: ${MAIL_FROM:-ChartDeck <no-reply@chartdeck.local>}
+  PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+  INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+
 services:
   redis:
     image: redis:7.4-alpine
@@ -58,17 +66,36 @@ services:
   api:
     build: { context: ., dockerfile: deploy/docker/service.Dockerfile, args: { SERVICE: api } }
     environment:
-      <<: *service-env
+      <<: [*service-env, *mail-env]
       DATABASE_URL: postgres://chartdeck:${POSTGRES_PASSWORD:-chartdeck}@timescale:5432/chartdeck
       TRUST_PROXY: "true"
       JWT_SECRET: ${JWT_SECRET:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
       COOKIE_SECURE: ${COOKIE_SECURE:-}
-    depends_on: { timescale: { condition: service_healthy } }
+    depends_on: { timescale: { condition: service_healthy }, redis: { condition: service_healthy } }
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/readyz"]
       interval: 10s
     restart: unless-stopped
+
+  # Evaluates alerts against the live stream. Exactly one replica, like ingest.
+  alerts:
+    build: { context: ., dockerfile: deploy/docker/service.Dockerfile, args: { SERVICE: alerts } }
+    environment:
+      <<: [*service-env, *mail-env]
+      DATABASE_URL: postgres://chartdeck:${POSTGRES_PASSWORD:-chartdeck}@timescale:5432/chartdeck
+      API_URL: http://api:8081
+    depends_on: { api: { condition: service_healthy }, redis: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9102/readyz"]
+      interval: 10s
+    restart: unless-stopped
+
+  # Optional local inbox for outgoing mail: http://localhost:8025
+  mailpit:
+    profiles: [mail]
+    image: axllent/mailpit:v1.27
+    ports: ["127.0.0.1:8025:8025", "127.0.0.1:1025:1025"]
 
   web:
     build: { context: ., dockerfile: deploy/docker/web.Dockerfile }

@@ -19,6 +19,9 @@ spec:
             - { name: DATABASE_URL, value: "postgres://chartdeck:$(DB_PASSWORD)@timescale:5432/chartdeck" }
             # Shared by all replicas so any of them can verify any access token.
             - { name: JWT_SECRET, valueFrom: { secretKeyRef: { name: chartdeck-auth, key: jwt-secret } } }
+            - { name: SMTP_URL, valueFrom: { secretKeyRef: { name: chartdeck-mail, key: smtp-url, optional: true } } }
+            # Lets the alerts service fetch history without being rate-limited.
+            - { name: INTERNAL_TOKEN, valueFrom: { secretKeyRef: { name: chartdeck-auth, key: internal-token, optional: true } } }
           ports: [{ name: http, containerPort: 8081 }]
           startupProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 2, failureThreshold: 60 }
           readinessProbe: { httpGet: { path: /readyz, port: http }, periodSeconds: 5 }

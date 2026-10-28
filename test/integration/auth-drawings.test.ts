@@ -15,6 +15,7 @@ import { HistoryService } from '../../services/api/src/history.ts';
 
 const DB_URL = process.env.TEST_DATABASE_URL ?? 'postgres://chartdeck:chartdeck@127.0.0.1:55432/chartdeck';
 const ORIGIN = 'http://localhost:5173';
+const noMail = { send: async () => {} };
 let db: Database;
 let app: FastifyInstance;
 
@@ -27,9 +28,10 @@ beforeAll(async () => {
   app = await buildApp({
     providers,
     history: new HistoryService(providers, null, log),
-    auth: new Auth({ users: new UserStore(db), jwtSecret: randomBytes(32), allowedOrigins: [ORIGIN], credentialRateLimitPerMin: 1000 }),
+    auth: new Auth({ users: new UserStore(db), jwtSecret: randomBytes(32), allowedOrigins: [ORIGIN], credentialRateLimitPerMin: 1000, mailer: noMail, publicUrl: ORIGIN }),
     drawings: new DrawingStore(db),
     docs: new DocStore(db),
+    alerts: null,
     ready: async () => true,
     metrics: async () => ({ contentType: 'text/plain', body: '' }),
     rateLimitPerMinute: 1000,
@@ -67,7 +69,7 @@ describe('auth', () => {
     const cookie = res.cookies.find((c) => c.name === 'cd_refresh')!;
     expect(cookie).toMatchObject({ httpOnly: true, sameSite: 'Strict', path: '/api/auth' });
     const me = await app.inject({ method: 'GET', url: '/api/auth/me', headers: { authorization: `Bearer ${body.accessToken}` } });
-    expect(me.json()).toEqual({ user: { id: body.user.id, email: e } });
+    expect(me.json()).toEqual({ user: { id: body.user.id, email: e, emailVerified: false } });
   });
 
   it('normalises email and rejects duplicates and weak passwords', async () => {
@@ -121,8 +123,8 @@ describe('auth', () => {
     const providers = new Map([['mock', new MockProvider()]]);
     const strictApp = await buildApp({
       providers, history: new HistoryService(providers, null, log),
-      auth: new A({ users: new UserStore(db), jwtSecret: randomBytes(32), allowedOrigins: [ORIGIN] }),
-      drawings: new DrawingStore(db), docs: new DocStore(db), ready: async () => true,
+      auth: new A({ users: new UserStore(db), jwtSecret: randomBytes(32), allowedOrigins: [ORIGIN], mailer: noMail, publicUrl: ORIGIN }),
+      drawings: new DrawingStore(db), docs: new DocStore(db), alerts: null, ready: async () => true,
       metrics: async () => ({ contentType: 'text/plain', body: '' }), rateLimitPerMinute: 1000, trustProxy: false, logger: false,
     });
     const codes: number[] = [];

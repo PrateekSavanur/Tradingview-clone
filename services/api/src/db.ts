@@ -1,4 +1,4 @@
-import type { Candle, Drawing, Timeframe } from '@chartdeck/shared';
+import type { Alert, AlertEvent, AlertSpec, AlertStatus, Candle, Drawing, Timeframe } from '@chartdeck/shared';
 import pg from 'pg';
 
 const MIGRATIONS = [
@@ -42,6 +42,46 @@ const MIGRATIONS = [
      updated_at timestamptz NOT NULL DEFAULT now(),
      PRIMARY KEY (user_id, kind, name)
    )`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at timestamptz`,
+  // One-time links for email verification and password reset; only the hash is stored.
+  `CREATE TABLE IF NOT EXISTS email_tokens (
+     token_hash bytea PRIMARY KEY,
+     user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     purpose    text NOT NULL,
+     expires_at timestamptz NOT NULL,
+     used_at    timestamptz,
+     created_at timestamptz NOT NULL DEFAULT now()
+   )`,
+  `CREATE INDEX IF NOT EXISTS email_tokens_user ON email_tokens (user_id, purpose)`,
+  // Written by the api (CRUD) and the alerts service (fired, triggered, expired).
+  `CREATE TABLE IF NOT EXISTS alerts (
+     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+     user_id       uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     symbol        text NOT NULL,
+     spec          jsonb NOT NULL,
+     status        text NOT NULL DEFAULT 'active',
+     expires_at    timestamptz,
+     last_fired_at timestamptz,
+     fire_count    integer NOT NULL DEFAULT 0,
+     created_at    timestamptz NOT NULL DEFAULT now(),
+     updated_at    timestamptz NOT NULL DEFAULT now()
+   )`,
+  `CREATE INDEX IF NOT EXISTS alerts_user ON alerts (user_id)`,
+  `CREATE INDEX IF NOT EXISTS alerts_active ON alerts (status) WHERE status = 'active'`,
+  `CREATE TABLE IF NOT EXISTS alert_events (
+     id        bigserial PRIMARY KEY,
+     alert_id  uuid REFERENCES alerts(id) ON DELETE SET NULL,
+     user_id   uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     fired_at  timestamptz NOT NULL,
+     symbol    text NOT NULL,
+     tf        text NOT NULL,
+     message   text NOT NULL,
+     price     double precision NOT NULL,
+     value     double precision,
+     target    double precision,
+     read_at   timestamptz
+   )`,
+  `CREATE INDEX IF NOT EXISTS alert_events_user ON alert_events (user_id, id DESC)`,
   `CREATE TABLE IF NOT EXISTS drawings (
      user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
      symbol     text NOT NULL,
@@ -110,7 +150,10 @@ export interface UserRow {
   id: string;
   email: string;
   password_hash: string;
+  email_verified_at: Date | null;
 }
+
+const USER_COLS = 'id, email, password_hash, email_verified_at';
 
 export interface RefreshRow {
   id: string;
@@ -127,19 +170,19 @@ export class UserStore {
 
   async create(email: string, passwordHash: string): Promise<UserRow | null> {
     const { rows } = await this.db.pool.query<UserRow>(
-      `INSERT INTO users (email, password_hash) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING RETURNING id, email, password_hash`,
+      `INSERT INTO users (email, password_hash) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING RETURNING ${USER_COLS}`,
       [email, passwordHash],
     );
     return rows[0] ?? null;
   }
 
   async byEmail(email: string): Promise<UserRow | null> {
-    const { rows } = await this.db.pool.query<UserRow>(`SELECT id, email, password_hash FROM users WHERE email = $1`, [email]);
+    const { rows } = await this.db.pool.query<UserRow>(`SELECT ${USER_COLS} FROM users WHERE email = $1`, [email]);
     return rows[0] ?? null;
   }
 
   async byId(id: string): Promise<UserRow | null> {
-    const { rows } = await this.db.pool.query<UserRow>(`SELECT id, email, password_hash FROM users WHERE id = $1`, [id]);
+    const { rows } = await this.db.pool.query<UserRow>(`SELECT ${USER_COLS} FROM users WHERE id = $1`, [id]);
     return rows[0] ?? null;
   }
 
@@ -173,7 +216,148 @@ export class UserStore {
   async revokeFamily(family: string): Promise<void> {
     await this.db.pool.query(`UPDATE refresh_tokens SET revoked_at = now() WHERE family = $1 AND revoked_at IS NULL`, [family]);
   }
+
+  /** Sign out every session (after a password reset). */
+  async revokeAll(userId: string): Promise<void> {
+    await this.db.pool.query(`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, [userId]);
+  }
+
+  async setPassword(userId: string, passwordHash: string): Promise<void> {
+    await this.db.pool.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, passwordHash]);
+  }
+
+  async markVerified(userId: string): Promise<void> {
+    await this.db.pool.query(`UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()) WHERE id = $1`, [userId]);
+  }
+
+  /** New one-time token; earlier unused ones for the same purpose stop working. */
+  async addEmailToken(userId: string, purpose: EmailTokenPurpose, hash: Buffer, expiresAt: Date): Promise<void> {
+    await this.db.pool.query(`DELETE FROM email_tokens WHERE user_id = $1 AND purpose = $2`, [userId, purpose]);
+    await this.db.pool.query(
+      `INSERT INTO email_tokens (token_hash, user_id, purpose, expires_at) VALUES ($1, $2, $3, $4)`,
+      [hash, userId, purpose, expiresAt],
+    );
+  }
+
+  /** Consume a token: returns its user if it was valid, unused and unexpired. Single use, atomically. */
+  async useEmailToken(hash: Buffer, purpose: EmailTokenPurpose): Promise<string | null> {
+    const { rows } = await this.db.pool.query<{ user_id: string }>(
+      `UPDATE email_tokens SET used_at = now()
+        WHERE token_hash = $1 AND purpose = $2 AND used_at IS NULL AND expires_at > now()
+        RETURNING user_id`,
+      [hash, purpose],
+    );
+    return rows[0]?.user_id ?? null;
+  }
 }
+
+export type EmailTokenPurpose = 'verify' | 'reset';
+
+interface AlertRow {
+  id: string;
+  spec: AlertSpec;
+  status: AlertStatus;
+  last_fired_at: Date | null;
+  fire_count: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+const toAlert = (r: AlertRow): Alert => ({
+  ...r.spec, id: r.id, status: r.status, lastFiredAt: r.last_fired_at?.getTime() ?? null, fireCount: r.fire_count,
+  createdAt: r.created_at.getTime(), updatedAt: r.updated_at.getTime(),
+});
+
+interface EventRow {
+  id: string;
+  alert_id: string | null;
+  fired_at: Date;
+  symbol: string;
+  tf: Timeframe;
+  message: string;
+  price: number;
+  value: number | null;
+  target: number | null;
+  read_at: Date | null;
+}
+
+export const toAlertEvent = (r: EventRow): AlertEvent => ({
+  id: Number(r.id), alertId: r.alert_id, firedAt: r.fired_at.getTime(), symbol: r.symbol, tf: r.tf, message: r.message,
+  price: r.price, value: r.value, target: r.target, read: r.read_at !== null,
+});
+
+const ALERT_COLS = 'id, spec, status, last_fired_at, fire_count, created_at, updated_at';
+
+export class AlertStore {
+  constructor(private readonly db: Database) {}
+
+  async list(userId: string): Promise<Alert[]> {
+    const { rows } = await this.db.pool.query<AlertRow>(`SELECT ${ALERT_COLS} FROM alerts WHERE user_id = $1 ORDER BY created_at DESC`, [userId]);
+    return rows.map(toAlert);
+  }
+
+  /** Returns null when the user already has `max` alerts. */
+  async create(userId: string, spec: AlertSpec, max: number): Promise<Alert | null> {
+    const { rows } = await this.db.pool.query<AlertRow>(
+      `INSERT INTO alerts (user_id, symbol, spec, expires_at)
+       SELECT $1, $2, $3, $4 WHERE (SELECT count(*) FROM alerts WHERE user_id = $1) < $5
+       RETURNING ${ALERT_COLS}`,
+      [userId, spec.symbol.id, JSON.stringify(spec), toDate(spec.expiresAt), max],
+    );
+    return rows[0] ? toAlert(rows[0]) : null;
+  }
+
+  /** Replace the condition; the alert becomes active again with a fresh start. */
+  async update(userId: string, id: string, spec: AlertSpec): Promise<Alert | null> {
+    const { rows } = await this.db.pool.query<AlertRow>(
+      `UPDATE alerts SET symbol = $3, spec = $4, expires_at = $5, status = 'active', updated_at = now()
+        WHERE id = $1 AND user_id = $2 RETURNING ${ALERT_COLS}`,
+      [id, userId, spec.symbol.id, JSON.stringify(spec), toDate(spec.expiresAt)],
+    );
+    return rows[0] ? toAlert(rows[0]) : null;
+  }
+
+  async setStatus(userId: string, id: string, status: 'active' | 'paused'): Promise<Alert | null> {
+    const { rows } = await this.db.pool.query<AlertRow>(
+      `UPDATE alerts SET status = $3, updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING ${ALERT_COLS}`,
+      [id, userId, status],
+    );
+    return rows[0] ? toAlert(rows[0]) : null;
+  }
+
+  async get(userId: string, id: string): Promise<Alert | null> {
+    const { rows } = await this.db.pool.query<AlertRow>(`SELECT ${ALERT_COLS} FROM alerts WHERE id = $1 AND user_id = $2`, [id, userId]);
+    return rows[0] ? toAlert(rows[0]) : null;
+  }
+
+  async delete(userId: string, id: string): Promise<boolean> {
+    const r = await this.db.pool.query(`DELETE FROM alerts WHERE id = $1 AND user_id = $2`, [id, userId]);
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  /** Newest first, `before` an event id for paging. */
+  async events(userId: string, limit: number, before?: number): Promise<{ events: AlertEvent[]; unread: number }> {
+    const [list, unread] = await Promise.all([
+      this.db.pool.query<EventRow>(
+        `SELECT id, alert_id, fired_at, symbol, tf, message, price, value, target, read_at FROM alert_events
+          WHERE user_id = $1 AND ($2::bigint IS NULL OR id < $2) ORDER BY id DESC LIMIT $3`,
+        [userId, before ?? null, limit],
+      ),
+      this.db.pool.query<{ n: string }>(`SELECT count(*) AS n FROM alert_events WHERE user_id = $1 AND read_at IS NULL`, [userId]),
+    ]);
+    return { events: list.rows.map(toAlertEvent), unread: Number(unread.rows[0]?.n ?? 0) };
+  }
+
+  async markRead(userId: string): Promise<void> {
+    await this.db.pool.query(`UPDATE alert_events SET read_at = now() WHERE user_id = $1 AND read_at IS NULL`, [userId]);
+  }
+
+  async clearEvents(userId: string): Promise<void> {
+    await this.db.pool.query(`DELETE FROM alert_events WHERE user_id = $1`, [userId]);
+  }
+}
+
+const toDate = (ms: number | null) => (ms === null ? null : new Date(ms));
 
 export class DocStore {
   constructor(private readonly db: Database) {}

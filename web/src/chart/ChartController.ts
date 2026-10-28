@@ -1,7 +1,7 @@
 import { TF_MS, type Candle, type SymbolInfo, type Timeframe } from '@chartdeck/shared';
 import {
-  AreaSeries, BarSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, PriceScaleMode, createChart,
-  type IChartApi, type ISeriesApi, type LogicalRange, type MouseEventParams, type SeriesType, type Time,
+  AreaSeries, BarSeries, CandlestickSeries, ColorType, CrosshairMode, HistogramSeries, LineSeries, LineStyle, PriceScaleMode, createChart,
+  type IChartApi, type IPriceLine, type ISeriesApi, type LogicalRange, type MouseEventParams, type SeriesType, type Time,
 } from 'lightweight-charts';
 import { DrawingManager } from '../drawings/DrawingManager.ts';
 import { TimeIndex } from '../drawings/geometry.ts';
@@ -36,6 +36,12 @@ export interface VisibleTimes {
   from: number;
   to: number;
   tf: Timeframe;
+}
+
+/** A price an alert watches, drawn as a dashed line on the price scale. */
+export interface AlertLevel {
+  price: number;
+  title: string;
 }
 
 const PAGE = 500;
@@ -74,6 +80,8 @@ export class ChartController {
   private pointerInside = false;
   private readonly crosshairSyncListeners = new Set<(time: number | null) => void>();
   private readonly rangeSyncListeners = new Set<(r: VisibleTimes) => void>();
+  private alertLevels: AlertLevel[] = [];
+  private alertLines: IPriceLine[] = [];
 
   readonly latency = new LatencyTracker();
   readonly drawings: DrawingManager;
@@ -150,6 +158,26 @@ export class ChartController {
     this.drawings.setActive(active);
   }
 
+  /** Close of the latest bar and the latest value of every indicator plot (by instance uid). */
+  currentValues(): { close: number | null; indicators: Map<string, Record<string, number | null>> } {
+    return { close: this.bars[this.bars.length - 1]?.close ?? null, indicators: this.indicators.latest() };
+  }
+
+  setAlertLevels(levels: AlertLevel[]): void {
+    this.alertLevels = levels;
+    this.drawAlertLines();
+  }
+
+  /** Price lines belong to the main series, so they are redrawn whenever that series is replaced. */
+  private drawAlertLines(): void {
+    for (const l of this.alertLines) this.main.removePriceLine(l);
+    this.alertLines = this.alertLevels.map((a) =>
+      this.main.createPriceLine({
+        price: a.price, color: '#ff9800', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: a.title,
+      }),
+    );
+  }
+
   setLogScale(on: boolean): void {
     this.main.priceScale().applyOptions({ mode: on ? PriceScaleMode.Logarithmic : PriceScaleMode.Normal });
   }
@@ -190,7 +218,9 @@ export class ChartController {
     this.main.priceScale().applyOptions({ mode: old.priceScale().options().mode });
     this.drawings.attach(this.main);
     this.indicators.setMain(this.main);
+    this.alertLines = []; // they go with the old series
     this.chart.removeSeries(old);
+    this.drawAlertLines();
     this.renderAll();
   }
 

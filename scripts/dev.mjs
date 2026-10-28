@@ -5,6 +5,8 @@ import { spawn } from 'node:child_process';
 const env = {
   REDIS_URL: 'redis://localhost:56379',
   DATABASE_URL: 'postgres://chartdeck:chartdeck@localhost:55432/chartdeck',
+  API_URL: 'http://localhost:8081',
+  PUBLIC_URL: 'http://localhost:5173',
   LOG_LEVEL: 'info',
   ...process.env,
 };
@@ -12,9 +14,10 @@ const procs = [
   ['ingest', ['run', 'dev', '-w', 'services/ingest']],
   ['gateway', ['run', 'dev', '-w', 'services/ws-gateway']],
   ['api', ['run', 'dev', '-w', 'services/api']],
+  ['alerts', ['run', 'dev', '-w', 'services/alerts']],
   ['web', ['run', 'dev', '-w', 'web']],
 ];
-const colors = [36, 35, 33, 32];
+const colors = [36, 35, 33, 31, 32];
 const children = procs.map(([name, args], i) => {
   const child = spawn('npm', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
   const prefix = `\x1b[${colors[i]}m${name.padEnd(8)}\x1b[0m| `;

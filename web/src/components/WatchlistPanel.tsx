@@ -20,7 +20,7 @@ export function WatchlistPanel() {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--panel)] text-[13px]" aria-label="Watchlist">
+    <div className="flex min-h-0 flex-1 flex-col" role="tabpanel" aria-label="Watchlist">
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-[var(--border)] px-2">
         {editing ? (
           <NameInput
@@ -87,7 +87,7 @@ export function WatchlistPanel() {
           </li>
         )}
       </ul>
-    </aside>
+    </div>
   );
 }
 

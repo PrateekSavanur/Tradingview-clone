@@ -10,13 +10,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@chartdeck/alert-engine": "*",
+    "@chartdeck/indicators": "*",
     "@chartdeck/shared": "*",
     "fancy-canvas": "^2.1.0",
     "lightweight-charts": "^5.2.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "zustand": "^5.0.16",
-    "@chartdeck/indicators": "*"
+    "zustand": "^5.0.16"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -11,6 +11,7 @@ resources:
   - ingest.yaml
   - ws-gateway.yaml
   - api.yaml
+  - alerts.yaml
   - web.yaml
   - ingress.yaml
 # Point these at your registry, e.g. registry.lan:5000/chartdeck/ingest
@@ -18,4 +19,5 @@ images:
   - { name: chartdeck/ingest, newTag: "0.1.0" }
   - { name: chartdeck/ws-gateway, newTag: "0.1.0" }
   - { name: chartdeck/api, newTag: "0.1.0" }
+  - { name: chartdeck/alerts, newTag: "0.1.0" }
   - { name: chartdeck/web, newTag: "0.1.0" }

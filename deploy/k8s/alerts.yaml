@@ -1,0 +1,31 @@
+# Exactly one alerts replica: two would each evaluate and fire every alert. Recreate avoids overlap during rollouts.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alerts
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: alerts } }
+  template:
+    metadata:
+      labels: { app: alerts }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9102", prometheus.io/path: /metrics }
+    spec:
+      containers:
+        - name: alerts
+          image: chartdeck/alerts
+          envFrom: [{ configMapRef: { name: chartdeck-config } }]
+          env:
+            - { name: DB_PASSWORD, valueFrom: { secretKeyRef: { name: chartdeck-db, key: password } } }
+            - { name: DATABASE_URL, value: "postgres://chartdeck:$(DB_PASSWORD)@timescale:5432/chartdeck" }
+            - { name: API_URL, value: "http://api:8081" }
+            - { name: SMTP_URL, valueFrom: { secretKeyRef: { name: chartdeck-mail, key: smtp-url, optional: true } } }
+            - { name: INTERNAL_TOKEN, valueFrom: { secretKeyRef: { name: chartdeck-auth, key: internal-token, optional: true } } }
+          ports: [{ name: ops, containerPort: 9102 }]
+          readinessProbe: { httpGet: { path: /readyz, port: ops }, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: /healthz, port: ops }, periodSeconds: 10 }
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 384Mi }
+          securityContext: { runAsNonRoot: true, readOnlyRootFilesystem: true, allowPrivilegeEscalation: false }

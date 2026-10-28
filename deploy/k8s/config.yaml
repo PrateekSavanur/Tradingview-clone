@@ -11,6 +11,11 @@ data:
   # Must list the public origin(s) the browser loads the app from.
   ALLOWED_ORIGINS: https://chartdeck.example.com
   COOKIE_SECURE: "true"
+  # Origin used in links inside emails.
+  PUBLIC_URL: https://chartdeck.example.com
+  MAIL_FROM: ChartDeck <no-reply@chartdeck.example.com>
 # Secrets you create yourself (see README):
 #   kubectl -n chartdeck create secret generic chartdeck-db --from-literal=password='<strong password>'
-#   kubectl -n chartdeck create secret generic chartdeck-auth --from-literal=jwt-secret="$(openssl rand -base64 48)"
+#   kubectl -n chartdeck create secret generic chartdeck-auth --from-literal=jwt-secret="$(openssl rand -base64 48)" \
+#     --from-literal=internal-token="$(openssl rand -hex 32)"
+#   kubectl -n chartdeck create secret generic chartdeck-mail --from-literal=smtp-url='smtps://user:pass@smtp.example.com:465'
