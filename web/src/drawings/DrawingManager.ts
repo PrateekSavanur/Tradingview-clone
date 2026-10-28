@@ -6,7 +6,7 @@ import type {
 } from 'lightweight-charts';
 import { History, TimeIndex, type Pt } from './geometry.ts';
 import { hasPendingSave, loadDrawings, saveDrawings } from './persistence.ts';
-import { HIT_PX, TOOLS, type Viewport } from './tools.ts';
+import { HIT_PX, TOOLS, defaultFibLevels, isFibTool, type Viewport } from './tools.ts';
 
 export interface DrawingUiState {
   tool: DrawingType | null;
@@ -268,7 +268,7 @@ export class DrawingManager {
   }
 
   /** Patch the selected drawing (style, lock, text). */
-  updateSelected(patch: Partial<Pick<Drawing, 'style' | 'locked' | 'text'>>): void {
+  updateSelected(patch: Partial<Pick<Drawing, 'style' | 'locked' | 'text' | 'levels'>>): void {
     const id = this.selectedId;
     if (!id) return;
     this.mutate((ds) => ds.map((d) => (d.id === id ? { ...d, ...patch, updatedAt: Date.now() } : d)));
@@ -583,6 +583,7 @@ export class DrawingManager {
   private make(type: DrawingType, points: DrawingPoint[]): Drawing {
     return {
       id: newId(), type, points, style: { ...TOOLS[type].defaultStyle },
+      ...(isFibTool(type) && { levels: defaultFibLevels(type) }),
       ...(type === 'text' ? { text: '' } : {}), updatedAt: Date.now(),
     };
   }

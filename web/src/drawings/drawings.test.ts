@@ -1,7 +1,11 @@
 import type { Candle, Drawing } from '@chartdeck/shared';
 import { describe, expect, it } from 'vitest';
 import { History, TimeIndex, distToSegment, pointInPolygon } from './geometry.ts';
-import { TOOLS, fibExtension, fibRetracement, formatDuration, measureStats, positionStats, type Viewport } from './tools.ts';
+import { Drawing as DrawingSchema } from '@chartdeck/shared';
+import {
+  FIB_PRESETS, FIB_ZONE_COLORS, TOOLS, builtinFibLevels, fibBands, fibExtension, fibRetracement, formatDuration, measureStats, positionStats,
+  type Viewport,
+} from './tools.ts';
 
 const M = 60_000;
 const T0 = Date.parse('2026-10-27T10:00:00Z');
@@ -42,6 +46,54 @@ describe('fibonacci', () => {
     expect(lv[0]).toBe(120);
     expect(lv[1]).toBe(170);
     expect(lv[1.618]).toBeCloseTo(200.9, 10);
+  });
+});
+
+describe('fibonacci levels', () => {
+  const preset = (id: string) => FIB_PRESETS.find((p) => p.id === id)!;
+
+  it('computes any custom set of levels', () => {
+    expect(fibRetracement(100, 200, [0.705]).map((l) => l.price)).toEqual([200 - 100 * 0.705]);
+    expect(fibExtension(100, 150, 120, [-0.272])[0]!.price).toBeCloseTo(120 - 50 * 0.272, 10);
+  });
+
+  it('colours each range by the level farther from 0, merging across hidden levels', () => {
+    const bands = fibBands([
+      { level: -0.272, color: '#111111' }, { level: 0, color: '#000000' }, { level: 0.382, color: '#aaaaaa' }, { level: 0.618, color: '#bbbbbb' },
+    ]);
+    expect(bands).toEqual([
+      { from: -0.272, to: 0, color: '#111111' },
+      { from: 0, to: 0.382, color: '#aaaaaa' },
+      { from: 0.382, to: 0.618, color: '#bbbbbb' },
+    ]);
+  });
+
+  it('"Key levels" shows only the classic levels; "All" brings the rest back with colours kept', () => {
+    const key = preset('key').apply(builtinFibLevels('fib'), 'fib');
+    expect(key.filter((l) => l.visible).map((l) => l.value)).toEqual([0, 0.382, 0.5, 0.618, 1]);
+    const all = preset('all').apply(key, 'fib');
+    expect(all.every((l) => l.visible)).toBe(true);
+    expect(all.map((l) => l.color)).toEqual(builtinFibLevels('fib').map((l) => l.color));
+    expect(preset('key').apply(builtinFibLevels('fibext'), 'fibext').filter((l) => l.visible).map((l) => l.value)).toContain(1.618);
+  });
+
+  it('"Zones" colours shallow, golden pocket, deep and extension ranges', () => {
+    const z = Object.fromEntries(preset('zones').apply(builtinFibLevels('fib'), 'fib').map((l) => [l.value, l.color]));
+    expect([z[0.236], z[0.382]]).toEqual([FIB_ZONE_COLORS.shallow, FIB_ZONE_COLORS.shallow]);
+    expect([z[0.5], z[0.618]]).toEqual([FIB_ZONE_COLORS.golden, FIB_ZONE_COLORS.golden]);
+    expect([z[0.786], z[1]]).toEqual([FIB_ZONE_COLORS.deep, FIB_ZONE_COLORS.deep]);
+    expect(z[1.618]).toBe(FIB_ZONE_COLORS.extension);
+  });
+
+  it('stores levels with the drawing and validates them', () => {
+    const base = {
+      id: 'fib123abc', type: 'fib', updatedAt: 1, points: [{ time: 1, price: 1 }, { time: 2, price: 2 }],
+      style: { color: '#787b86', width: 1, dash: 'solid' },
+    };
+    expect(DrawingSchema.safeParse({ ...base, levels: builtinFibLevels('fib') }).success).toBe(true);
+    expect(DrawingSchema.safeParse(base).success).toBe(true); // older drawings: built-in levels
+    expect(DrawingSchema.safeParse({ ...base, levels: [{ value: 0.5, color: 'red', visible: true }] }).success).toBe(false);
+    expect(DrawingSchema.safeParse({ ...base, levels: Array.from({ length: 25 }, (_, i) => ({ value: i / 10, color: '#ffffff', visible: true })) }).success).toBe(false);
   });
 });
 

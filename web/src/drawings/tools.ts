@@ -1,4 +1,4 @@
-import type { Candle, Drawing, DrawingPoint, DrawingStyle, DrawingType } from '@chartdeck/shared';
+import { FibLevel, MAX_FIB_LEVELS, type Candle, type Drawing, type DrawingPoint, type DrawingStyle, type DrawingType } from '@chartdeck/shared';
 import { distToSegment, extendRay, pointInPolygon, type Pt } from './geometry.ts';
 
 /** Screen <-> data mapping for the main pane, rebuilt every frame. */
@@ -55,13 +55,97 @@ const FIB_COLORS: Record<string, string> = {
 };
 
 /** Retracement drawn from `a` to `b`: level 0 sits at `b`, level 1 back at `a`. */
-export function fibRetracement(a: number, b: number): Array<{ level: number; price: number }> {
-  return FIB_LEVELS.map((level) => ({ level, price: b + (a - b) * level }));
+export function fibRetracement(a: number, b: number, levels: readonly number[] = FIB_LEVELS): Array<{ level: number; price: number }> {
+  return levels.map((level) => ({ level, price: b + (a - b) * level }));
 }
 
 /** Trend-based extension: the A->B move projected from C. */
-export function fibExtension(a: number, b: number, c: number): Array<{ level: number; price: number }> {
-  return FIB_EXT_LEVELS.map((level) => ({ level, price: c + (b - a) * level }));
+export function fibExtension(a: number, b: number, c: number, levels: readonly number[] = FIB_EXT_LEVELS): Array<{ level: number; price: number }> {
+  return levels.map((level) => ({ level, price: c + (b - a) * level }));
+}
+
+export type FibTool = 'fib' | 'fibext';
+export const isFibTool = (t: DrawingType): t is FibTool => t === 'fib' || t === 'fibext';
+
+export function builtinFibLevels(type: FibTool): FibLevel[] {
+  return (type === 'fib' ? FIB_LEVELS : FIB_EXT_LEVELS).map((value) => ({ value, color: FIB_COLORS[String(value)] ?? '#787b86', visible: true }));
+}
+
+const defaultKey = (type: FibTool) => `chartdeck-fib-default:${type}`;
+
+/** Levels new drawings of this tool start with: the user's saved default, else the built-in set. */
+export function defaultFibLevels(type: FibTool): FibLevel[] {
+  try {
+    const parsed = FibLevel.array().max(MAX_FIB_LEVELS).safeParse(JSON.parse(localStorage.getItem(defaultKey(type)) ?? 'null'));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // no storage (tests, privacy mode) or bad JSON
+  }
+  return builtinFibLevels(type);
+}
+
+/** `null` forgets the saved default. */
+export function saveDefaultFibLevels(type: FibTool, levels: FibLevel[] | null): void {
+  try {
+    if (levels) localStorage.setItem(defaultKey(type), JSON.stringify(levels));
+    else localStorage.removeItem(defaultKey(type));
+  } catch (err) {
+    console.warn('[fib] could not save default levels', err);
+  }
+}
+
+export const fibLevelsOf = (d: Drawing): FibLevel[] => d.levels ?? builtinFibLevels(d.type as FibTool);
+
+/** Range colours for the "Zones" preset: shallow, golden pocket, deep, extension. */
+export const FIB_ZONE_COLORS = { below: '#787b86', shallow: '#089981', golden: '#ff9800', deep: '#f23645', extension: '#2962ff' } as const;
+
+export const FIB_PRESETS: Array<{ id: string; label: string; hint: string; apply(levels: FibLevel[], type: FibTool): FibLevel[] }> = [
+  { id: 'all', label: 'All', hint: 'Show every level', apply: (ls) => ls.map((l) => ({ ...l, visible: true })) },
+  {
+    id: 'key', label: 'Key levels', hint: '0, 0.382, 0.5, 0.618, 1 (and 1.618 on extensions)',
+    apply: (ls, type) => ls.map((l) => ({ ...l, visible: [0, 0.382, 0.5, 0.618, 1, ...(type === 'fibext' ? [1.618] : [])].includes(l.value) })),
+  },
+  {
+    id: 'zones', label: 'Zones', hint: 'Colour by range: up to 0.382 shallow, to 0.618 golden pocket, to 1 deep, beyond 1 extension',
+    apply: (ls) => ls.map((l) => ({ ...l, color: fibZoneColor(l.value) })),
+  },
+  { id: 'reset', label: 'Reset', hint: 'Built-in levels and colours', apply: (_ls, type) => builtinFibLevels(type) },
+];
+
+export function fibZoneColor(value: number): string {
+  if (value <= 0) return FIB_ZONE_COLORS.below;
+  if (value <= 0.382) return FIB_ZONE_COLORS.shallow;
+  if (value <= 0.618) return FIB_ZONE_COLORS.golden;
+  if (value <= 1) return FIB_ZONE_COLORS.deep;
+  return FIB_ZONE_COLORS.extension;
+}
+
+interface FibLine {
+  level: number;
+  price: number;
+  color: string;
+}
+
+/** Visible levels, ascending, with their prices. */
+function visibleFib(d: Drawing, priceOf: (level: number) => number): FibLine[] {
+  return fibLevelsOf(d)
+    .filter((l) => l.visible)
+    .sort((a, b) => a.value - b.value)
+    .map((l) => ({ level: l.value, price: priceOf(l.value), color: l.color }));
+}
+
+/**
+ * Bands between consecutive visible levels; each takes the colour of the level farther from 0,
+ * so hiding a level merges its band into the next one.
+ */
+export function fibBands(lines: Array<{ level: number; color: string }>): Array<{ from: number; to: number; color: string }> {
+  const out = [];
+  for (let i = 0; i < lines.length - 1; i++) {
+    const lo = lines[i]!;
+    const hi = lines[i + 1]!;
+    out.push({ from: lo.level, to: hi.level, color: Math.abs(hi.level) >= Math.abs(lo.level) ? hi.color : lo.color });
+  }
+  return out;
 }
 
 export interface PositionStats {
@@ -348,21 +432,19 @@ const rect: ToolDef = {
   },
 };
 
-function drawFibLevels(
-  ctx: CanvasRenderingContext2D, vp: Viewport, levels: Array<{ level: number; price: number }>, x1: number, x2: number, d: Drawing,
-): void {
+function drawFibLevels(ctx: CanvasRenderingContext2D, vp: Viewport, levels: FibLine[], x1: number, x2: number, d: Drawing): void {
   const ys = levels.map((l) => vp.y(l.price));
   if (d.style.fill !== false) {
-    for (let i = 0; i < levels.length - 1; i++) {
-      ctx.fillStyle = withAlpha(FIB_COLORS[String(levels[i + 1]!.level)] ?? d.style.color, 0.08);
+    fibBands(levels).forEach((band, i) => {
+      ctx.fillStyle = withAlpha(band.color, 0.1);
       ctx.fillRect(x1, Math.min(ys[i]!, ys[i + 1]!), x2 - x1, Math.abs(ys[i + 1]! - ys[i]!));
-    }
+    });
   }
   ctx.font = FONT;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
   levels.forEach((l, i) => {
-    const color = FIB_COLORS[String(l.level)] ?? d.style.color;
+    const color = l.color;
     stroke(ctx, d.style, color, d.style.width);
     segment(ctx, { x: x1, y: ys[i]! }, { x: x2, y: ys[i]! });
     ctx.fillStyle = color;
@@ -375,18 +457,20 @@ function hitFibLevels(vp: Viewport, levels: Array<{ price: number }>, x1: number
   return levels.some((l) => Math.abs(vp.y(l.price) - p.y) <= HIT_PX);
 }
 
+const retracementLines = (d: Drawing) => visibleFib(d, (l) => fibRetracement(d.points[0]!.price, d.points[1]!.price, [l])[0]!.price);
+
 const fib: ToolDef = {
   type: 'fib', label: 'Fib retracement', defaultStyle: { color: '#787b86', width: 1, dash: 'solid', fill: true }, fillable: true,
   draw(ctx, vp, d) {
     const [a, b] = d.points.map((p) => screen(vp, p)) as [Pt, Pt];
     if (!valid(a, b)) return;
-    drawFibLevels(ctx, vp, fibRetracement(d.points[0]!.price, d.points[1]!.price), Math.min(a.x, b.x), Math.max(a.x, b.x), d);
+    drawFibLevels(ctx, vp, retracementLines(d), Math.min(a.x, b.x), Math.max(a.x, b.x), d);
     stroke(ctx, { ...d.style, dash: 'dashed' }, withAlpha(d.style.color, 0.8), 1);
     segment(ctx, a, b);
   },
   hit(vp, d, p) {
     const [a, b] = d.points.map((q) => screen(vp, q)) as [Pt, Pt];
-    return nearSeg(p, a, b) || hitFibLevels(vp, fibRetracement(d.points[0]!.price, d.points[1]!.price), Math.min(a.x, b.x), Math.max(a.x, b.x), p);
+    return nearSeg(p, a, b) || hitFibLevels(vp, retracementLines(d), Math.min(a.x, b.x), Math.max(a.x, b.x), p);
   },
   handles: pointHandles,
 };
@@ -402,7 +486,7 @@ const fibext: ToolDef = {
     if (!valid(a, b, c)) return;
     const [A, B, C] = d.points as [DrawingPoint, DrawingPoint, DrawingPoint];
     const [x1, x2] = fibExtSpan(a, b, c);
-    drawFibLevels(ctx, vp, fibExtension(A.price, B.price, C.price), x1, x2, d);
+    drawFibLevels(ctx, vp, visibleFib(d, (l) => fibExtension(A.price, B.price, C.price, [l])[0]!.price), x1, x2, d);
     stroke(ctx, { ...d.style, dash: 'dashed' }, withAlpha(d.style.color, 0.8), 1);
     segment(ctx, a, b);
     segment(ctx, b, c);
@@ -411,7 +495,7 @@ const fibext: ToolDef = {
     const [a, b, c] = d.points.map((q) => screen(vp, q)) as [Pt, Pt, Pt];
     const [A, B, C] = d.points as [DrawingPoint, DrawingPoint, DrawingPoint];
     const [x1, x2] = fibExtSpan(a, b, c);
-    return nearSeg(p, a, b) || nearSeg(p, b, c) || hitFibLevels(vp, fibExtension(A.price, B.price, C.price), x1, x2, p);
+    return nearSeg(p, a, b) || nearSeg(p, b, c) || hitFibLevels(vp, visibleFib(d, (l) => fibExtension(A.price, B.price, C.price, [l])[0]!.price), x1, x2, p);
   },
   handles: pointHandles,
 };

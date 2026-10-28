@@ -28,6 +28,15 @@ export const DrawingStyle = z.object({
 });
 export type DrawingStyle = z.infer<typeof DrawingStyle>;
 
+/** One line of a Fibonacci tool. A band between two visible levels takes the colour of the one farther from 0. */
+export const FibLevel = z.object({
+  value: z.number().finite().min(-10).max(10),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  visible: z.boolean(),
+});
+export type FibLevel = z.infer<typeof FibLevel>;
+export const MAX_FIB_LEVELS = 24;
+
 export const Drawing = z
   .object({
     id: z.string().regex(/^[A-Za-z0-9_-]{6,40}$/),
@@ -35,6 +44,8 @@ export const Drawing = z
     points: z.array(DrawingPoint).min(1).max(3),
     style: DrawingStyle,
     text: z.string().max(500).optional(),
+    /** fib / fibext only; absent means the built-in levels. */
+    levels: z.array(FibLevel).max(MAX_FIB_LEVELS).optional(),
     locked: z.boolean().optional(),
     updatedAt: z.number().int().nonnegative(),
   })
