@@ -5,7 +5,7 @@ import { TOOLS } from '../drawings/tools.ts';
 import { useDrawings } from '../lib/useDrawings.ts';
 import { ToolIcon } from './ToolIcon.tsx';
 
-const GROUPS: Array<{ id: string; label: string; tools: DrawingType[] }> = [
+export const GROUPS: Array<{ id: string; label: string; tools: DrawingType[] }> = [
   { id: 'lines', label: 'Lines', tools: ['trendline', 'ray', 'arrow', 'hline', 'vline', 'channel'] },
   { id: 'fib', label: 'Fibonacci', tools: ['fib', 'fibext'] },
   { id: 'shapes', label: 'Shapes & text', tools: ['rect', 'text'] },

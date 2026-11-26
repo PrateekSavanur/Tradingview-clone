@@ -59,7 +59,8 @@ export function ChartView({ index, onController }: { index: number; onController
 
   return (
     <div className="relative min-h-0 min-w-0 bg-[var(--bg)]" onPointerDownCapture={() => setActive(index)}>
-      <div ref={el} className="absolute inset-0" />
+      {/* touch-none: the chart pans/zooms itself; without it the browser can cancel a drawing drag mid-gesture. */}
+      <div ref={el} className="absolute inset-0 touch-none" />
       {multi && active && <div className="pointer-events-none absolute inset-0 z-20 border-2 border-[var(--accent)]/70" aria-hidden />}
       <div className="pointer-events-none absolute left-3 right-20 top-2 z-10 flex flex-col items-start gap-0.5">
         <Legend symbol={symbol} tf={tf} data={legend} />

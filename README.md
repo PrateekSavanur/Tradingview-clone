@@ -121,7 +121,9 @@ Nasdaq, Dow) come from Yahoo Finance's public chart and search endpoints. Free, 
 The web app ships a manifest and icons, so Chrome offers **Install app** on desktop and **Add to Home
 screen → Install** on Android; it then opens standalone, edge to edge. Installing needs HTTPS (or
 localhost). Under 768 px wide the layout switches to a phone layout: timeframe picker, a menu for
-indicators/alerts/chart type/theme, full-screen watchlist and alerts, no drawing toolbar.
+indicators/alerts/chart type/theme, full-screen watchlist and alerts, and a floating pen button
+for drawing: it opens every tool, magnet, hide, undo/redo and clear. Tap to place one-point tools; tap
+two points, or press and drag, for the rest. Hit targets widen for touch.
 
 ### Indicators
 

@@ -42,7 +42,11 @@ export interface ToolDef {
   fillable?: boolean;
 }
 
-export const HIT_PX = 6;
+/** How close (px) a pointer must be to a line or edge to hit it. Wider for fingers than for a mouse. */
+export let HIT_PX = 6;
+export const setCoarsePointer = (coarse: boolean): void => {
+  HIT_PX = coarse ? 14 : 6;
+};
 const FONT = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
 // ------------------------------------------------------------------ calculations (pure)

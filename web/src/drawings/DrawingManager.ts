@@ -6,7 +6,7 @@ import type {
 } from 'lightweight-charts';
 import { History, TimeIndex, type Pt } from './geometry.ts';
 import { hasPendingSave, loadDrawings, saveDrawings } from './persistence.ts';
-import { HIT_PX, TOOLS, defaultFibLevels, isFibTool, type Viewport } from './tools.ts';
+import { HIT_PX, TOOLS, setCoarsePointer, defaultFibLevels, isFibTool, type Viewport } from './tools.ts';
 
 export interface DrawingUiState {
   tool: DrawingType | null;
@@ -437,7 +437,7 @@ export class DrawingManager {
         const h = handles[i]!;
         const hx = sel.type === 'hline' ? vp.width / 2 : vp.x(h.at.time);
         const hy = sel.type === 'vline' ? vp.height / 2 : vp.y(h.at.price);
-        if (Math.hypot(p.x - hx, p.y - hy) <= HANDLE_RADIUS + 3) return { id: sel.id, handle: i };
+        if (Math.hypot(p.x - hx, p.y - hy) <= Math.max(HANDLE_RADIUS + 3, HIT_PX + 4)) return { id: sel.id, handle: i };
       }
     }
     for (let i = this.drawings.length - 1; i >= 0; i--) {
@@ -471,6 +471,7 @@ export class DrawingManager {
 
   private readonly onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0 || this.editing) return;
+    setCoarsePointer(e.pointerType === 'touch');
     const p = this.local(e);
     const vp = p && this.viewport();
     if (!p || !vp) return;

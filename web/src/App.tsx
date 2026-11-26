@@ -6,6 +6,7 @@ import { AuthDialog, ResetPasswordDialog } from './components/AuthMenu.tsx';
 import { ChartGrid } from './components/ChartGrid.tsx';
 import { DebugPanel } from './components/DebugPanel.tsx';
 import { DrawingToolbar } from './components/DrawingToolbar.tsx';
+import { MobileDrawBar } from './components/MobileDrawBar.tsx';
 import { IndicatorPicker } from './components/IndicatorPicker.tsx';
 import { IndicatorSettings } from './components/IndicatorSettings.tsx';
 import { SymbolSearch } from './components/SymbolSearch.tsx';
@@ -115,6 +116,7 @@ export function App() {
         </div>
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <ChartGrid onControllers={onControllers} />
+          <MobileDrawBar controller={controller} />
           <DebugPanel controller={controller} />
         </main>
         {sidePanel && <SidePanel panel={sidePanel} />}
