@@ -1,4 +1,4 @@
-import type { Timeframe } from '@chartdeck/shared';
+import type { SymbolInfo, Timeframe } from '@chartdeck/shared';
 
 export function decimalsFor(tickSize: number): number {
   if (tickSize >= 1) return 0;
@@ -39,4 +39,18 @@ export function formatBarTime(ms: number, tf: Timeframe): string {
     year: '2-digit', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit',
     ...(withSeconds ? { second: '2-digit' } : {}),
   }).format(ms);
+}
+
+const INDEX_NAMES: Record<string, string> = {
+  '^NSEI': 'NIFTY', '^BSESN': 'SENSEX', '^NSEBANK': 'BANKNIFTY', '^CNXIT': 'NIFTYIT',
+  '^GSPC': 'SPX', '^IXIC': 'IXIC', '^DJI': 'DJI', '^NDX': 'NDX', '^RUT': 'RUT', '^VIX': 'VIX',
+};
+
+/**
+ * Ticker as traders write it. Stock tickers are Yahoo symbols (RELIANCE.NS, ^NSEI), whose suffix
+ * repeats the exchange shown next to them, so it is dropped; indices get their common names.
+ */
+export function displayTicker(s: Pick<SymbolInfo, 'provider' | 'ticker'>): string {
+  if (s.provider !== 'india' && s.provider !== 'us') return s.ticker;
+  return INDEX_NAMES[s.ticker] ?? s.ticker.replace(/^\^/, '').replace(/\.(NS|BO)$/, '');
 }

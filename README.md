@@ -92,6 +92,37 @@ from its response headers.
 browser estimates the gateway clock offset from its min-RTT ping. The debug panel (pulse icon in
 the top bar) shows p50/p90/p99 per stage, including browser paint.
 
+### Stocks: India and US
+
+`india` (NSE/BSE stocks and indices like NIFTY 50, SENSEX) and `us` (NYSE/Nasdaq stocks, ETFs, S&P 500,
+Nasdaq, Dow) come from Yahoo Finance's public chart and search endpoints. Free, no account, no key.
+
+- **Polled, not streamed.** No free socket exists, so ingest runs a `PolledFeed`: each watched symbol is
+  fetched once a minute during market hours (`STOCK_POLL_MS`), every 15 min when closed. One request
+  returns the day's 1-minute bars, from which every timeframe's open candle is built. Batches go out
+  on the same Redis channels as crypto, so gateways, hot cache and alerts are unchanged.
+- **Polite to Yahoo.** One client per process serialises requests (`YAHOO_MIN_GAP_MS`, default 1.5 s),
+  shares identical in-flight calls, caches results, and on a 429 stops all Yahoo traffic for 1 min,
+  doubling to 15 min. Charts keep the last data; the status pill shows *Stale*. Stock history skips
+  TimescaleDB (`cacheHistory = false`); the provider's in-memory cache already covers repeat views.
+- **Session-aligned candles.** Intraday bars open at the session open (NSE 09:15, NYSE 09:30, DST-aware),
+  so hourly bars run 09:15, 10:15… like the exchange's. 3m, 2h and 4h are built from 1m and 1h bars.
+  Daily and longer bars are keyed by the exchange-local date. 1s isn't offered for stocks.
+- **History depth** follows Yahoo: 1m/3m about 7 days, 5m–30m 60 days, 1h–4h about 2 years, 1D+ full.
+- **UI.** Symbol search has All / Crypto / India / US tabs (Tab cycles them). Watchlists group rows by
+  market and quote stock change against the previous close. The status pill shows *Open* / *Closed* per
+  market, and treats an in-session quiet spell over 20 min as a holiday.
+- **Caveat.** These endpoints are unofficial and undocumented; Yahoo can rate-limit or change them at any
+  time. The provider is self-contained (`packages/data-providers/src/yahoo`), so a broker API (Angel One
+  SmartAPI, Upstox, Alpaca) can replace it without touching the rest.
+
+### Install as an app
+
+The web app ships a manifest and icons, so Chrome offers **Install app** on desktop and **Add to Home
+screen → Install** on Android; it then opens standalone, edge to edge. Installing needs HTTPS (or
+localhost). Under 768 px wide the layout switches to a phone layout: timeframe picker, a menu for
+indicators/alerts/chart type/theme, full-screen watchlist and alerts, no drawing toolbar.
+
 ### Indicators
 
 `packages/indicators` holds 28 indicators, written to Pine Script's conventions. That includes the

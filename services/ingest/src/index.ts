@@ -3,6 +3,7 @@ import { createLogger, env, envInt, initMetrics, onShutdown, startOpsServer } fr
 import { REDIS_KEYS, parseSymbolId } from '@chartdeck/shared';
 import { Redis } from 'ioredis';
 import { ProviderFeed } from './feed.ts';
+import { PolledFeed } from './polled-feed.ts';
 
 const log = createLogger('ingest');
 initMetrics('ingest');
@@ -14,13 +15,22 @@ redis.on('error', (err) => log.error({ err }, 'redis error'));
 sub.on('error', (err) => log.error({ err }, 'redis subscriber error'));
 
 const providers = createProviders({
-  enabled: env('PROVIDERS', 'binance'),
+  enabled: env('PROVIDERS', 'binance,india,us'),
   binanceRestUrl: process.env.BINANCE_REST_URL || undefined,
   binanceWsUrl: process.env.BINANCE_WS_URL || undefined,
+  stockPollMs: envInt('STOCK_POLL_MS', 60_000),
+  yahooMinGapMs: envInt('YAHOO_MIN_GAP_MS', 1500),
 });
 
-const feeds = new Map<string, ProviderFeed>();
+const feeds = new Map<string, ProviderFeed | PolledFeed>();
 for (const p of providers.values()) {
+  if (p.snapshot) {
+    feeds.set(p.id, new PolledFeed(p, redis, log, {
+      lingerMs: envInt('INGEST_LINGER_MS', 60_000),
+      hotTtlSec: envInt('HOT_CACHE_TTL_SEC', 120),
+    }));
+    continue;
+  }
   feeds.set(p.id, new ProviderFeed(p, redis, log, {
     flushMs: envInt('INGEST_FLUSH_MS', 25),
     lingerMs: envInt('INGEST_LINGER_MS', 60_000),

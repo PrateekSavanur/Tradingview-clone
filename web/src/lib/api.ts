@@ -1,4 +1,4 @@
-import { fromTuple, type Candle, type CandleTuple, type SymbolInfo, type Timeframe } from '@chartdeck/shared';
+import { fromTuple, type Candle, type CandleTuple, type MarketId, type SymbolInfo, type Timeframe } from '@chartdeck/shared';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -15,8 +15,9 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function searchSymbols(q: string, signal?: AbortSignal): Promise<SymbolInfo[]> {
-  return getJson(`/api/symbols/search?q=${encodeURIComponent(q)}&limit=30`, signal);
+export function searchSymbols(q: string, market: MarketId | 'all', signal?: AbortSignal): Promise<SymbolInfo[]> {
+  const m = market === 'all' ? '' : `&market=${market}`;
+  return getJson(`/api/symbols/search?q=${encodeURIComponent(q)}&limit=30${m}`, signal);
 }
 
 export function getSymbol(id: string): Promise<SymbolInfo> {

@@ -6,7 +6,7 @@ import { useWorkspace } from '../store/workspace.ts';
 import { ToolIcon } from './ToolIcon.tsx';
 
 /** Rows with name, inputs and values; overlays sit under the main legend, oscillators at their pane's top. */
-export function IndicatorLegend({ chart, items, controller, priceDecimals }: { chart: number; items: IndicatorLegendItem[]; controller: ChartController | null; priceDecimals: number }) {
+export function IndicatorLegend({ part, chart, items, controller, priceDecimals }: { part: 'overlay' | 'panes'; chart: number; items: IndicatorLegendItem[]; controller: ChartController | null; priceDecimals: number }) {
   if (!controller || !items.length) return null;
   const overlay = items.filter((i) => i.pane === 0);
   const panes = items.filter((i) => i.pane > 0);
@@ -18,8 +18,8 @@ export function IndicatorLegend({ chart, items, controller, priceDecimals }: { c
   const row = (it: IndicatorLegendItem) => <Row key={it.uid} chart={chart} item={it} fmt={(v) => fmt(v, it.pane)} />;
   return (
     <>
-      {overlay.length > 0 && <div className="absolute left-3 top-[3.1rem] z-10 flex flex-col gap-0.5">{overlay.map(row)}</div>}
-      {panes.map((it) => (
+      {part === 'overlay' && overlay.length > 0 && <div className="pointer-events-auto flex flex-col gap-0.5">{overlay.map(row)}</div>}
+      {part === 'panes' && panes.map((it) => (
         <div key={it.uid} className="absolute left-3 z-10" style={{ top: controller.paneTop(it.pane) + 4 }}>
           {row(it)}
         </div>

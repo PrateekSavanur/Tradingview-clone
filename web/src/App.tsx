@@ -1,3 +1,4 @@
+import { MARKETS, marketOfProvider } from '@chartdeck/shared';
 import { useCallback, useEffect, useState } from 'react';
 import type { ChartController } from './chart/ChartController.ts';
 import { AlertDialog } from './components/AlertDialog.tsx';
@@ -17,6 +18,7 @@ import { useAlerts } from './store/alerts.ts';
 import { toast } from './store/toasts.ts';
 import { useUi } from './store/ui.ts';
 import { useActiveChart, useWorkspace } from './store/workspace.ts';
+import { displayTicker } from './lib/format.ts';
 
 export function App() {
   const theme = useUi((s) => s.theme);
@@ -30,11 +32,13 @@ export function App() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
+    // Colours the browser bar / installed app's status bar to match the top bar.
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#1e222d' : '#ffffff');
   }, [theme]);
 
   useEffect(() => {
-    document.title = `${symbol.ticker} · ChartDeck`;
-  }, [symbol.ticker]);
+    document.title = `${displayTicker(symbol)} · ChartDeck`;
+  }, [symbol]);
 
   // Links from emails: /?verify=<token> confirms the address, /?reset=<token> opens the new-password dialog.
   useEffect(() => {
@@ -106,7 +110,9 @@ export function App() {
     <div className="flex h-full flex-col">
       <TopBar controller={controller} />
       <div className="flex min-h-0 flex-1">
-        <DrawingToolbar controller={controller} />
+        <div className="hidden md:flex">
+          <DrawingToolbar controller={controller} />
+        </div>
         <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <ChartGrid onControllers={onControllers} />
           <DebugPanel controller={controller} />
@@ -114,8 +120,11 @@ export function App() {
         {sidePanel && <SidePanel panel={sidePanel} />}
       </div>
       <footer className="flex h-6 shrink-0 items-center justify-between border-t border-[var(--border)] bg-[var(--panel)] px-3 text-[11px] text-[var(--muted)]">
-        <span>{symbol.description} · {symbol.exchange}</span>
-        <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="hover:underline">
+        <span className="truncate">
+          {symbol.description} · {symbol.exchange}
+          {MARKETS[marketOfProvider(symbol.provider)].dataNote && <span className="hidden sm:inline"> · {MARKETS[marketOfProvider(symbol.provider)].dataNote}</span>}
+        </span>
+        <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="hidden shrink-0 hover:underline sm:inline">
           Charts by TradingView Lightweight Charts™
         </a>
       </footer>

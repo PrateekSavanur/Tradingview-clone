@@ -54,6 +54,7 @@ export class ProviderFeed {
     private readonly log: Logger,
     private readonly opts: FeedOptions,
   ) {
+    if (!provider.openStream) throw new Error(`Provider ${provider.id} has no live stream`);
     this.stream = provider.openStream({
       onTrade: (t) => this.onTrade(t),
       onState: (s) => this.setState(s),

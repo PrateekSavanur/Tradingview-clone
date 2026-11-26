@@ -1,5 +1,5 @@
 import {
-  LAYOUT_CELLS, WorkspaceDoc, type ChartDoc, type IndicatorInstanceDoc, type LayoutKind, type SymbolInfo, type Timeframe,
+  LAYOUT_CELLS, WorkspaceDoc, marketOfProvider, marketTimeframes, type ChartDoc, type IndicatorInstanceDoc, type LayoutKind, type SymbolInfo, type Timeframe,
 } from '@chartdeck/shared';
 
 /**
@@ -65,12 +65,16 @@ function mapCharts(ws: WorkspaceDoc, index: number, linked: boolean, fn: (c: Cha
 
 /** With symbol sync on, every visible chart follows. */
 export function setSymbol(ws: WorkspaceDoc, index: number, symbol: SymbolInfo): WorkspaceDoc {
-  return mapCharts(ws, index, ws.sync.symbol, (c) => (c.symbol.id === symbol.id ? c : { ...c, symbol }));
+  // Stocks have no 1s bars: a chart on an unsupported timeframe drops to 1m.
+  const tfs = marketTimeframes(marketOfProvider(symbol.provider));
+  return mapCharts(ws, index, ws.sync.symbol, (c) => (c.symbol.id === symbol.id ? c : { ...c, symbol, tf: tfs.includes(c.tf) ? c.tf : '1m' }));
 }
 
 /** With interval sync on, every visible chart follows. */
 export function setTf(ws: WorkspaceDoc, index: number, tf: Timeframe): WorkspaceDoc {
-  return mapCharts(ws, index, ws.sync.interval, (c) => (c.tf === tf ? c : { ...c, tf }));
+  // Linked charts on a market without that timeframe (1s on a stock) keep theirs.
+  return mapCharts(ws, index, ws.sync.interval, (c) =>
+    c.tf === tf || !marketTimeframes(marketOfProvider(c.symbol.provider)).includes(tf) ? c : { ...c, tf });
 }
 
 export function patchChart(ws: WorkspaceDoc, index: number, patch: Partial<Omit<ChartDoc, 'symbol' | 'tf'>>): WorkspaceDoc {

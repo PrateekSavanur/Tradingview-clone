@@ -4,7 +4,7 @@ metadata:
   name: chartdeck-config
 data:
   REDIS_URL: redis://redis:6379
-  PROVIDERS: binance
+  PROVIDERS: binance,india,us
   LOG_LEVEL: info
   INGEST_FLUSH_MS: "25"
   TRUST_PROXY: "true"

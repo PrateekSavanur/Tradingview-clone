@@ -3,7 +3,7 @@ import { AlertSpecError, normalizeSpec } from '@chartdeck/alert-engine';
 import type { MarketDataProvider } from '@chartdeck/data-providers';
 import { ProviderError } from '@chartdeck/data-providers';
 import {
-  DOC_NAME_RE, DOC_SCHEMAS, DrawingSet, MAX_ALERTS_PER_USER, MAX_DOCS_PER_KIND, SINGLETON_DOC_KINDS, TIMEFRAMES, isSymbolId, parseSymbolId, toTuple,
+  DOC_NAME_RE, DOC_SCHEMAS, DrawingSet, MAX_ALERTS_PER_USER, MAX_DOCS_PER_KIND, SINGLETON_DOC_KINDS, MARKET_IDS, TIMEFRAMES, isSymbolId, marketOfProvider, parseSymbolId, toTuple,
   type DocKind, type SymbolInfo,
 } from '@chartdeck/shared';
 import cookie from '@fastify/cookie';
@@ -64,6 +64,8 @@ const MAX_STREAMS_PER_USER = 10;
 const SearchQuery = z.object({
   q: z.string().max(40).default(''),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  /** Restrict to one market's providers; omitted searches all of them. */
+  market: z.enum(MARKET_IDS).optional(),
 });
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -96,16 +98,22 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   app.get('/api/providers', async () =>
-    [...deps.providers.values()].map((p) => ({ id: p.id, name: p.name, timeframes: p.timeframes })),
+    [...deps.providers.values()].map((p) => ({ id: p.id, name: p.name, market: marketOfProvider(p.id), timeframes: p.timeframes })),
   );
 
   app.get('/api/symbols/search', async (req) => {
-    const { q, limit } = SearchQuery.parse(req.query);
-    const results = await Promise.allSettled([...deps.providers.values()].map((p) => p.searchSymbols(q, limit)));
+    const { q, limit, market } = SearchQuery.parse(req.query);
+    const providers = [...deps.providers.values()].filter((p) => !market || marketOfProvider(p.id) === market);
+    if (!providers.length) return [];
+    const results = await Promise.allSettled(providers.map((p) => p.searchSymbols(q, limit)));
+    const lists = results.map((r) => (r.status === 'fulfilled' ? r.value : []));
+    if (lists.every((l) => !l.length) && results.every((r) => r.status === 'rejected')) throw (results[0] as PromiseRejectedResult).reason;
+    // Interleave so every market's best matches make the cut, not just the first provider's.
     const merged: SymbolInfo[] = [];
-    for (const r of results) if (r.status === 'fulfilled') merged.push(...r.value);
-    if (!merged.length && results.every((r) => r.status === 'rejected')) throw (results[0] as PromiseRejectedResult).reason;
-    return merged.slice(0, limit);
+    for (let i = 0; merged.length < limit && lists.some((l) => i < l.length); i++) {
+      for (const l of lists) if (i < l.length && merged.length < limit) merged.push(l[i]!);
+    }
+    return merged;
   });
 
   app.get<{ Params: { id: string } }>('/api/symbols/:id', async (req, reply) => {

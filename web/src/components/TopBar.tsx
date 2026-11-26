@@ -1,4 +1,4 @@
-import { TIMEFRAMES } from '@chartdeck/shared';
+import { marketOfProvider, marketTimeframes } from '@chartdeck/shared';
 import { useEffect, useRef, useState } from 'react';
 import type { ChartController } from '../chart/ChartController.ts';
 import { useAlerts } from '../store/alerts.ts';
@@ -7,18 +7,21 @@ import { CHART_TYPES, CHART_TYPE_LABELS, useUi, type ChartType } from '../store/
 import { useActiveChart, useWorkspace } from '../store/workspace.ts';
 import { AuthMenu } from './AuthMenu.tsx';
 import { LayoutMenu } from './LayoutMenu.tsx';
+import { MobileMenu } from './MobileMenu.tsx';
 import { StatusIndicator } from './StatusIndicator.tsx';
+import { displayTicker } from '../lib/format.ts';
 
 export function TopBar({ controller }: { controller: ChartController | null }) {
   const { theme, toggleTheme, toggleDebug, debugOpen, openSearch, sidePanel, toggleSidePanel } = useUi();
   const unread = useAlerts((s) => s.unread);
   const { symbol, tf, logScale = false } = useActiveChart();
   const { setTf, setLogScale } = useWorkspace.getState();
+  const tfs = marketTimeframes(marketOfProvider(symbol.provider));
   return (
     <header className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--panel)] px-2">
       <div className="mr-1 flex items-center gap-1.5 pl-1 pr-2 font-semibold tracking-tight">
         <img src="/favicon.svg" alt="" className="h-5 w-5" />
-        <span className="hidden md:inline">ChartDeck</span>
+        <span className="hidden lg:inline">ChartDeck</span>
       </div>
       <button
         onClick={() => openSearch()}
@@ -26,11 +29,20 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
         title="Symbol search (or just start typing)"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-        {symbol.ticker}
+        {displayTicker(symbol)}
       </button>
       <Divider />
-      <nav className="flex min-w-0 items-center overflow-x-auto [scrollbar-width:none]" aria-label="Timeframe">
-        {TIMEFRAMES.map((t) => (
+      {/* Phones get the native picker; the button row needs more width than they have. */}
+      <select
+        value={tf}
+        onChange={(e) => setTf(e.target.value as typeof tf)}
+        aria-label="Timeframe"
+        className="h-8 shrink-0 rounded bg-transparent px-1 text-[13px] font-semibold text-[var(--accent)] outline-none hover:bg-[var(--hover)] md:hidden"
+      >
+        {tfs.map((t) => <option key={t} value={t}>{t}</option>)}
+      </select>
+      <nav className="hidden min-w-0 items-center overflow-x-auto [scrollbar-width:none] md:flex" aria-label="Timeframe">
+        {tfs.map((t) => (
           <button
             key={t}
             onClick={() => setTf(t)}
@@ -41,6 +53,7 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
           </button>
         ))}
       </nav>
+      <div className="hidden shrink-0 items-center gap-1 md:flex">
       <Divider />
       <ChartTypeMenu />
       <Divider />
@@ -70,8 +83,10 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
       </button>
       <Divider />
       <LayoutMenu />
+      </div>
       <div className="flex-1" />
       <StatusIndicator controller={controller} />
+      <div className="hidden shrink-0 items-center gap-1 md:flex">
       <IconButton onClick={toggleDebug} pressed={debugOpen} title="Latency debug panel">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
       </IconButton>
@@ -81,9 +96,11 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
           {unread > 0 && <span className="absolute -right-1.5 -top-1.5 min-w-3.5 rounded-full bg-[var(--color-down)] px-0.5 text-center text-[9px] font-semibold leading-3.5 text-white">{unread > 9 ? '9+' : unread}</span>}
         </span>
       </IconButton>
+      </div>
       <IconButton onClick={() => toggleSidePanel('watchlist')} pressed={sidePanel === 'watchlist'} title="Watchlist">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
       </IconButton>
+      <div className="hidden shrink-0 items-center gap-1 md:flex">
       <IconButton onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>
         {theme === 'dark' ? (
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
@@ -94,6 +111,8 @@ export function TopBar({ controller }: { controller: ChartController | null }) {
       <div className="ml-1">
         <AuthMenu />
       </div>
+      </div>
+      <MobileMenu />
     </header>
   );
 }
@@ -144,7 +163,7 @@ function ChartTypeMenu() {
   );
 }
 
-function ChartTypeIcon({ type }: { type: ChartType }) {
+export function ChartTypeIcon({ type }: { type: ChartType }) {
   const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8 };
   switch (type) {
     case 'line':

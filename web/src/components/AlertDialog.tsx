@@ -7,7 +7,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import type { ChartController } from '../chart/ChartController.ts';
 import { sendVerification, useAuth } from '../lib/auth.ts';
-import { decimalsFor } from '../lib/format.ts';
+import { displayTicker, decimalsFor } from '../lib/format.ts';
 import { useAlerts, type AlertDialogState } from '../store/alerts.ts';
 import { toast } from '../store/toasts.ts';
 import { useUi } from '../store/ui.ts';
@@ -167,7 +167,7 @@ function AlertForm({ dialog, controller, emailVerified }: { dialog: NonNullable<
   return (
     <form onSubmit={submit}>
       <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
-        <h2 className="text-base font-semibold">{editing ? 'Edit alert' : 'Create alert'} · {symbol.ticker}</h2>
+        <h2 className="text-base font-semibold">{editing ? 'Edit alert' : 'Create alert'} · {displayTicker(symbol)}</h2>
         <button type="button" onClick={closeDialog} className="rounded px-1.5 text-[var(--muted)] hover:bg-[var(--hover)]" aria-label="Close">✕</button>
       </div>
       <div className="grid grid-cols-[6.5rem_1fr] items-center gap-x-3 gap-y-2.5 px-4 py-4 text-sm">

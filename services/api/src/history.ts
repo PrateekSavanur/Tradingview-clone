@@ -58,9 +58,10 @@ export class HistoryService {
     const lastOpen = to === undefined ? openBucket : prevBucket(tf, bucketStart(tf, to));
     const wantsOpenCandle = lastOpen >= openBucket;
 
-    if (this.cache && !wantsOpenCandle) {
+    const cache = provider.cacheHistory === false ? null : this.cache;
+    if (cache && !wantsOpenCandle) {
       try {
-        const rows = await this.cache.before(providerId, ticker, tf, lastOpen, limit);
+        const rows = await cache.before(providerId, ticker, tf, lastOpen, limit);
         if (rows.length === limit && isContiguous(tf, rows, lastOpen)) return { candles: rows, source: 'cache' };
       } catch (err) {
         this.log.warn({ err }, 'candle cache read failed');
@@ -68,9 +69,9 @@ export class HistoryService {
     }
 
     const candles = await provider.getCandles(ticker, tf, { endTime: to === undefined ? undefined : lastOpen, limit });
-    if (this.cache) {
+    if (cache) {
       const closed = candles.filter((c) => nextBucket(tf, c.time) <= now);
-      this.cache.upsert(providerId, ticker, tf, closed).catch((err) => this.log.warn({ err }, 'candle cache write failed'));
+      cache.upsert(providerId, ticker, tf, closed).catch((err) => this.log.warn({ err }, 'candle cache write failed'));
     }
     return { candles, source: 'provider' };
   }

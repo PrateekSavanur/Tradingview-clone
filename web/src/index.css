@@ -31,6 +31,12 @@
 html, body, #root {
   height: 100%;
 }
+/* Installed on a phone the app runs edge to edge; keep content out of the notch and gesture bar. */
+#root {
+  box-sizing: border-box;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  height: 100dvh;
+}
 body {
   margin: 0;
   background: var(--bg);

@@ -49,7 +49,23 @@ export interface MarketDataProvider {
   getCandles(ticker: string, tf: Timeframe, query: CandleQuery): Promise<Candle[]>;
   /** Provider clock (ms), used to compute the exchange clock offset. */
   serverTime(): Promise<number>;
-  openStream(handlers: StreamHandlers): TradeStream;
+  /**
+   * Live data comes either as a pushed trade stream (`openStream`, exchanges with a public
+   * socket) or by polling `snapshot` (sources that only serve bars over HTTP). Exactly one is set.
+   */
+  openStream?(handlers: StreamHandlers): TradeStream;
+  snapshot?(ticker: string): Promise<ProviderSnapshot>;
+  /** How long to wait between `snapshot` polls of one ticker right now (market hours aware). */
+  pollIntervalMs?(): number;
+  /** Whether closed candles may be cached in TimescaleDB. Defaults to true. */
+  readonly cacheHistory?: boolean;
+}
+
+/** The open candle of every timeframe the provider serves, as of one poll. */
+export interface ProviderSnapshot {
+  candles: Partial<Record<Timeframe, Candle>>;
+  /** Time of the latest price in the snapshot (exchange clock, ms). */
+  asOf: number;
 }
 
 export class ProviderError extends Error {

@@ -12,7 +12,9 @@ const log = createLogger('api');
 const registry = initMetrics('api');
 
 const providers = createProviders({
-  enabled: process.env.PROVIDERS || 'binance',
+  enabled: process.env.PROVIDERS || 'binance,india,us',
+  stockPollMs: envInt('STOCK_POLL_MS', 60_000),
+  yahooMinGapMs: envInt('YAHOO_MIN_GAP_MS', 1500),
   binanceRestUrl: process.env.BINANCE_REST_URL || undefined,
   binanceWsUrl: process.env.BINANCE_WS_URL || undefined,
 });

@@ -18,8 +18,9 @@ export function SidePanel({ panel }: { panel: Panel }) {
       {badge > 0 && <span className="tabular rounded-full bg-[var(--accent)] px-1.5 text-[10px] leading-4 text-white">{badge > 99 ? '99+' : badge}</span>}
     </button>
   );
+  // A full-screen sheet on phones, a right-hand column from md up.
   return (
-    <aside className="flex w-72 shrink-0 flex-col border-l border-[var(--border)] bg-[var(--panel)] text-[13px]">
+    <aside className="fixed inset-0 z-40 flex flex-col bg-[var(--panel)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-sm md:static md:z-auto md:w-72 md:shrink-0 md:border-l md:border-[var(--border)] md:p-0 md:text-[13px]">
       <div className="flex shrink-0 items-center gap-4 border-b border-[var(--border)] px-3" role="tablist">
         {tab('watchlist', 'Watchlist')}
         {tab('alerts', 'Alerts', unread)}

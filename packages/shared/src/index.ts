@@ -5,3 +5,4 @@ export * from './types.ts';
 export * from './drawings.ts';
 export * from './workspace.ts';
 export * from './alerts.ts';
+export * from './markets.ts';

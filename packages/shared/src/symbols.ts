@@ -1,4 +1,4 @@
-const SYMBOL_ID_RE = /^([a-z][a-z0-9_-]{1,19}):([A-Za-z0-9._\-&]{1,40})$/;
+const SYMBOL_ID_RE = /^([a-z][a-z0-9_-]{1,19}):([A-Za-z0-9._\-&^=]{1,40})$/;
 
 export function parseSymbolId(id: string): { provider: string; ticker: string } | null {
   const m = SYMBOL_ID_RE.exec(id);

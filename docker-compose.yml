@@ -2,7 +2,7 @@ name: chartdeck
 
 x-service-env: &service-env
   REDIS_URL: redis://redis:6379
-  PROVIDERS: ${PROVIDERS:-binance}
+  PROVIDERS: ${PROVIDERS:-binance,india,us}
   BINANCE_REST_URL: ${BINANCE_REST_URL:-}
   BINANCE_WS_URL: ${BINANCE_WS_URL:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}

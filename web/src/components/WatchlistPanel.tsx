@@ -1,8 +1,8 @@
-import type { Candle, SymbolInfo } from '@chartdeck/shared';
+import { MARKETS, MARKET_IDS, marketOfProvider, type Candle, type MarketId, type SymbolInfo } from '@chartdeck/shared';
 import { useEffect, useRef, useState } from 'react';
 import { getHistory } from '../lib/api.ts';
 import { feed } from '../lib/feed.ts';
-import { decimalsFor, formatPercent, formatPrice } from '../lib/format.ts';
+import { displayTicker, decimalsFor, formatPercent, formatPrice } from '../lib/format.ts';
 import { useUi } from '../store/ui.ts';
 import { useWatchlists } from '../store/watchlists.ts';
 import { useActiveChart, useWorkspace } from '../store/workspace.ts';
@@ -61,10 +61,15 @@ export function WatchlistPanel() {
       <div className="grid shrink-0 grid-cols-[1fr_5.5rem_4rem] gap-x-2 px-3 py-1 text-[11px] text-[var(--muted)]">
         <span>Symbol</span>
         <span className="text-right">Last</span>
-        <span className="text-right" title="Change since the daily bar opened (00:00 UTC for crypto)">Chg%</span>
+        <span className="text-right" title="Change from the previous close for stocks, since 00:00 UTC for crypto">Chg%</span>
       </div>
       <ul className="min-h-0 flex-1 overflow-y-auto">
-        {list.symbols.map((s, i) => (
+        {grouped(list.symbols).map(({ s, i, header }) => [
+          header && (
+            <li key={`h-${header}`} className="sticky top-0 z-10 bg-[var(--panel)] px-3 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">
+              {MARKETS[header].label}
+            </li>
+          ),
           <Row
             key={s.id}
             symbol={s}
@@ -78,8 +83,8 @@ export function WatchlistPanel() {
             }}
             onDragEnd={() => setDragFrom(null)}
             onRemove={() => remove(s.id)}
-          />
-        ))}
+          />,
+        ])}
         {!list.symbols.length && (
           <li className="px-3 py-6 text-center text-xs text-[var(--muted)]">
             Empty list.{' '}
@@ -89,6 +94,17 @@ export function WatchlistPanel() {
       </ul>
     </div>
   );
+}
+
+/**
+ * Rows in market order (crypto, India, US), keeping the user's order within each market, with a
+ * header before each market when the list mixes them. `i` is the index in the stored list.
+ */
+function grouped(symbols: SymbolInfo[]): Array<{ s: SymbolInfo; i: number; header: MarketId | null }> {
+  const rows = symbols.map((s, i) => ({ s, i, m: MARKET_IDS.indexOf(marketOfProvider(s.provider)) }));
+  rows.sort((a, b) => a.m - b.m || a.i - b.i);
+  const mixed = new Set(rows.map((r) => r.m)).size > 1;
+  return rows.map((r, k) => ({ s: r.s, i: r.i, header: mixed && (k === 0 || rows[k - 1]!.m !== r.m) ? MARKET_IDS[r.m]! : null }));
 }
 
 interface RowProps {
@@ -103,9 +119,10 @@ interface RowProps {
 
 function Row({ symbol, current, dragging, onDragStart, onDragEnter, onDragEnd, onRemove }: RowProps) {
   const ref = useRef<HTMLLIElement>(null);
-  const bar = useDailyBar(symbol.id, ref);
+  const { bar, prevClose } = useDailyBar(symbol, ref);
   const d = decimalsFor(symbol.tickSize);
-  const change = bar && bar.open ? ((bar.close - bar.open) / bar.open) * 100 : null;
+  const base = prevClose ?? bar?.open;
+  const change = bar && base ? ((bar.close - base) / base) * 100 : null;
   const up = change !== null && change >= 0;
 
   return (
@@ -119,23 +136,27 @@ function Row({ symbol, current, dragging, onDragStart, onDragEnter, onDragEnd, o
       onDragEnter={onDragEnter}
       onDragOver={(e) => e.preventDefault()}
       onDragEnd={onDragEnd}
-      onClick={() => useWorkspace.getState().setSymbol(symbol)}
+      onClick={() => {
+        useWorkspace.getState().setSymbol(symbol);
+        // On phones the list covers the chart; get out of the way once a symbol is picked.
+        if (matchMedia('(max-width: 767px)').matches) useUi.getState().setSidePanel(null);
+      }}
       title={`${symbol.description} · ${symbol.exchange}`}
-      className={`group relative grid cursor-pointer grid-cols-[1fr_5.5rem_4rem] items-center gap-x-2 px-3 py-1.5 hover:bg-[var(--hover)] ${current ? 'bg-[var(--accent)]/10' : ''} ${dragging ? 'opacity-50' : ''}`}
+      className={`group relative grid cursor-pointer grid-cols-[1fr_5.5rem_4rem] items-center gap-x-2 py-2.5 pl-3 pr-8 hover:bg-[var(--hover)] md:py-1.5 md:pr-3 ${current ? 'bg-[var(--accent)]/10' : ''} ${dragging ? 'opacity-50' : ''}`}
     >
-      <span className="truncate font-medium">{symbol.ticker}</span>
+      <span className="truncate font-medium">{displayTicker(symbol)}</span>
       <span className="tabular truncate text-right">{bar ? formatPrice(bar.close, d) : '–'}</span>
       <span className={`tabular text-right ${change === null ? 'text-[var(--muted)]' : up ? 'text-[var(--color-up)]' : 'text-[var(--color-down)]'}`}>
         {change === null ? '–' : formatPercent(change)}
       </span>
       <button
-        aria-label={`Remove ${symbol.ticker}`}
+        aria-label={`Remove ${displayTicker(symbol)}`}
         title="Remove from list"
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
         }}
-        className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded bg-[var(--panel)] text-[var(--muted)] opacity-0 hover:text-[var(--text)] focus:opacity-100 group-hover:opacity-100"
+        className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--text)] focus:opacity-100 group-hover:opacity-100 md:opacity-0"
       >
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6"><path d="M6 6l12 12M18 6L6 18" /></svg>
       </button>
@@ -147,8 +168,10 @@ function Row({ symbol, current, dragging, onDragStart, onDragEnter, onDragEnd, o
  * The current daily bar, streamed while the row is on screen. The gateway caps subscriptions per
  * connection, so off-screen rows of a long list don't subscribe.
  */
-function useDailyBar(symbolId: string, ref: React.RefObject<HTMLElement | null>): Candle | null {
+function useDailyBar(symbol: SymbolInfo, ref: React.RefObject<HTMLElement | null>): { bar: Candle | null; prevClose: number | null } {
+  const symbolId = symbol.id;
   const [bar, setBar] = useState<Candle | null>(null);
+  const [recent, setRecent] = useState<Candle[]>([]);
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -163,6 +186,11 @@ function useDailyBar(symbolId: string, ref: React.RefObject<HTMLElement | null>)
     if (!visible) return;
     let got = false;
     const ctrl = new AbortController();
+    // Stocks quote change against the previous session's close, as brokers do. Crypto has no
+    // session, so its daily candle's open (00:00 UTC) is the reference.
+    if (marketOfProvider(symbol.provider) !== 'crypto') {
+      getHistory(symbolId, '1D', { limit: 5 }, ctrl.signal).then(setRecent).catch(() => {});
+    }
     const off = feed.subscribe(symbolId, '1D', (e) => {
       got = true;
       setBar(e.candle);
@@ -178,9 +206,11 @@ function useDailyBar(symbolId: string, ref: React.RefObject<HTMLElement | null>)
       ctrl.abort();
       window.clearTimeout(t);
     };
-  }, [symbolId, visible]);
+  }, [symbolId, symbol.provider, visible]);
 
-  return bar;
+  const cur = bar ?? recent[recent.length - 1] ?? null;
+  const prev = cur ? recent.filter((c) => c.time < cur.time).pop() : undefined;
+  return { bar: cur, prevClose: prev?.close ?? null };
 }
 
 function NameInput({ initial, placeholder, onDone }: { initial: string; placeholder: string; onDone(name: string | null): void }) {

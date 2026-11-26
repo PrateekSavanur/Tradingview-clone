@@ -188,6 +188,11 @@ export class ChartController {
     return () => this.legendListeners.delete(fn);
   }
 
+  /** Exchange time of the newest price received live for this chart, or null before the first. */
+  get lastPriceTime(): number | null {
+    return this.lastEt > 0 ? this.lastEt : null;
+  }
+
   onStatus(fn: (s: ChartStatus) => void): () => void {
     this.statusListeners.add(fn);
     fn(this.status);
@@ -422,6 +427,8 @@ export class ChartController {
     if (this.epoch !== null && e.epoch !== this.epoch) void this.backfill('upstream restarted');
     this.epoch = e.epoch;
     if (this.status.loading) {
+      // Polled markets may send nothing more for hours (closed): remember the snapshot's time now.
+      if (this.lastEt === 0) this.lastEt = e.lat.et || -1;
       this.queued.push(e);
       return;
     }

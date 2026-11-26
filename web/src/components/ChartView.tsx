@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChartController, type ChartStatus, type LegendData } from '../chart/ChartController.ts';
 import { feed } from '../lib/feed.ts';
-import { decimalsFor } from '../lib/format.ts';
+import { displayTicker, decimalsFor } from '../lib/format.ts';
 import { useAlerts } from '../store/alerts.ts';
 import { useUi } from '../store/ui.ts';
 import { useWorkspace } from '../store/workspace.ts';
@@ -61,11 +61,14 @@ export function ChartView({ index, onController }: { index: number; onController
     <div className="relative min-h-0 min-w-0 bg-[var(--bg)]" onPointerDownCapture={() => setActive(index)}>
       <div ref={el} className="absolute inset-0" />
       {multi && active && <div className="pointer-events-none absolute inset-0 z-20 border-2 border-[var(--accent)]/70" aria-hidden />}
-      <Legend symbol={symbol} tf={tf} data={legend} />
-      <IndicatorLegend chart={index} items={legend?.indicators ?? []} controller={ctl} priceDecimals={decimalsFor(symbol.tickSize)} />
+      <div className="pointer-events-none absolute left-3 right-20 top-2 z-10 flex flex-col items-start gap-0.5">
+        <Legend symbol={symbol} tf={tf} data={legend} />
+        <IndicatorLegend part="overlay" chart={index} items={legend?.indicators ?? []} controller={ctl} priceDecimals={decimalsFor(symbol.tickSize)} />
+      </div>
+      <IndicatorLegend part="panes" chart={index} items={legend?.indicators ?? []} controller={ctl} priceDecimals={decimalsFor(symbol.tickSize)} />
       <SelectionToolbar controller={ctl} />
       <TextEditor controller={ctl} />
-      {status?.loading && <Overlay>Loading {symbol.ticker}…</Overlay>}
+      {status?.loading && <Overlay>Loading {displayTicker(symbol)}…</Overlay>}
       {status?.error && (
         <div className="absolute bottom-10 left-1/2 z-10 -translate-x-1/2 rounded-md border border-[var(--down,#f23645)]/40 bg-[var(--panel)] px-3 py-1.5 text-xs text-[#f23645] shadow">
           {status.error}

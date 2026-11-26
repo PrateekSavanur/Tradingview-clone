@@ -1,4 +1,4 @@
-import { CHART_TYPES, type ChartType } from '@chartdeck/shared';
+import { CHART_TYPES, type ChartType, type MarketId } from '@chartdeck/shared';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
@@ -26,6 +26,9 @@ interface UiState {
   /** Prefill for the search box when opened by typing on the chart. */
   searchSeed: string;
   searchTarget: SearchTarget;
+  /** Market tab in symbol search; remembered between searches. */
+  searchMarket: MarketId | 'all';
+  setSearchMarket(m: MarketId | 'all'): void;
   /** Sign-in dialog; anything that needs an account can open it. */
   authOpen: boolean;
   toggleTheme(): void;
@@ -49,6 +52,8 @@ export const useUi = create<UiState>()(
       searchOpen: false,
       searchSeed: '',
       searchTarget: 'chart',
+      searchMarket: 'all',
+      setSearchMarket: (searchMarket) => set({ searchMarket }),
       authOpen: false,
       setAuthOpen: (authOpen) => set({ authOpen }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
@@ -60,7 +65,7 @@ export const useUi = create<UiState>()(
     }),
     {
       name: 'chartdeck-ui',
-      partialize: (s) => ({ theme: s.theme, debugOpen: s.debugOpen, sidePanel: s.sidePanel }),
+      partialize: (s) => ({ theme: s.theme, debugOpen: s.debugOpen, sidePanel: s.sidePanel, searchMarket: s.searchMarket }),
     },
   ),
 );
