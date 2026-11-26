@@ -25,5 +25,6 @@ ARG SERVICE
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /app/services/${SERVICE}/dist ./dist
-USER node
+# Numeric, so Kubernetes' runAsNonRoot can verify it (the name `node` is uid 1000 in this image).
+USER 1000:1000
 CMD ["node", "--enable-source-maps", "dist/index.js"]
