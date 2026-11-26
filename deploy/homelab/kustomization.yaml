@@ -9,11 +9,11 @@ kind: Kustomization
 resources:
   - ../k8s
 images:
-  - { name: chartdeck/ingest, newName: prateeksavanur/chartdeck-ingest, newTag: "82a902cc17bf50c0ae1b7243801c64859f5803f7" }
-  - { name: chartdeck/ws-gateway, newName: prateeksavanur/chartdeck-ws-gateway, newTag: "82a902cc17bf50c0ae1b7243801c64859f5803f7" }
-  - { name: chartdeck/api, newName: prateeksavanur/chartdeck-api, newTag: "82a902cc17bf50c0ae1b7243801c64859f5803f7" }
-  - { name: chartdeck/alerts, newName: prateeksavanur/chartdeck-alerts, newTag: "82a902cc17bf50c0ae1b7243801c64859f5803f7" }
-  - { name: chartdeck/web, newName: prateeksavanur/chartdeck-web, newTag: "82a902cc17bf50c0ae1b7243801c64859f5803f7" }
+  - { name: chartdeck/ingest, newName: prateeksavanur/chartdeck-ingest, newTag: "f6fbdc6be309c7e3214b4beef1ae4b007c31e798" }
+  - { name: chartdeck/ws-gateway, newName: prateeksavanur/chartdeck-ws-gateway, newTag: "f6fbdc6be309c7e3214b4beef1ae4b007c31e798" }
+  - { name: chartdeck/api, newName: prateeksavanur/chartdeck-api, newTag: "f6fbdc6be309c7e3214b4beef1ae4b007c31e798" }
+  - { name: chartdeck/alerts, newName: prateeksavanur/chartdeck-alerts, newTag: "f6fbdc6be309c7e3214b4beef1ae4b007c31e798" }
+  - { name: chartdeck/web, newName: prateeksavanur/chartdeck-web, newTag: "f6fbdc6be309c7e3214b4beef1ae4b007c31e798" }
 patches:
   # One user: one replica each. A single api pod also keeps all Yahoo Finance history traffic
   # behind one rate limiter.
