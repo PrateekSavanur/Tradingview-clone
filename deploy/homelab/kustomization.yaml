@@ -1,0 +1,34 @@
+# Homelab deployment: k3s, synced by ArgoCD from this directory (Homelab-Infra k8s/apps/chartdeck.yml).
+# https://chartdeck.home.prateeksavanur.dev — AdGuard's wildcard rewrite and the cluster's wildcard
+# cert cover the host, so the Ingress needs no DNS or TLS config of its own.
+#
+# Image tags below are pinned by .github/workflows/deploy.yml after each build; don't edit them by hand.
+# Secrets (chartdeck-db, chartdeck-auth) are created by Homelab-Infra's Ansible role `chartdeck`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../k8s
+images:
+  - { name: chartdeck/ingest, newName: prateeksavanur/chartdeck-ingest, newTag: "unbuilt" }
+  - { name: chartdeck/ws-gateway, newName: prateeksavanur/chartdeck-ws-gateway, newTag: "unbuilt" }
+  - { name: chartdeck/api, newName: prateeksavanur/chartdeck-api, newTag: "unbuilt" }
+  - { name: chartdeck/alerts, newName: prateeksavanur/chartdeck-alerts, newTag: "unbuilt" }
+  - { name: chartdeck/web, newName: prateeksavanur/chartdeck-web, newTag: "unbuilt" }
+patches:
+  # One user: one replica each. A single api pod also keeps all Yahoo Finance history traffic
+  # behind one rate limiter.
+  - target: { kind: Deployment, name: "^(api|ws-gateway|web)$" }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  # With one gateway pod, minAvailable: 1 would block node drains forever.
+  - target: { kind: PodDisruptionBudget, name: ws-gateway }
+    patch: |
+      - { op: replace, path: /spec/minAvailable, value: 0 }
+  - target: { kind: Ingress, name: chartdeck }
+    patch: |
+      - { op: replace, path: /spec/rules/0/host, value: chartdeck.home.prateeksavanur.dev }
+  - target: { kind: ConfigMap, name: chartdeck-config }
+    patch: |
+      - { op: replace, path: /data/ALLOWED_ORIGINS, value: "https://chartdeck.home.prateeksavanur.dev" }
+      - { op: replace, path: /data/PUBLIC_URL, value: "https://chartdeck.home.prateeksavanur.dev" }
+      - { op: replace, path: /data/MAIL_FROM, value: "ChartDeck <no-reply@chartdeck.home.prateeksavanur.dev>" }

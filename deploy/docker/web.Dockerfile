@@ -13,8 +13,9 @@ COPY services/api/package.json services/api/
 COPY services/alerts/package.json services/alerts/
 COPY web/package.json web/
 RUN npm ci --no-audit --no-fund --ignore-scripts && npm rebuild esbuild
-COPY packages/shared packages/shared
-COPY packages/indicators packages/indicators
+# The web app imports shared, indicators and alert-engine; copying all packages keeps this from
+# silently breaking the next time it gains a workspace dependency.
+COPY packages packages
 COPY web web
 RUN npm run build -w web
 

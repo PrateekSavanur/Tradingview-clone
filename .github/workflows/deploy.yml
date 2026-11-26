@@ -1,0 +1,87 @@
+# Tests, builds the five images, pushes them to Docker Hub tagged with the commit SHA, then pins
+# that tag in deploy/homelab/kustomization.yaml. ArgoCD (Homelab-Infra k8s/apps/chartdeck.yml)
+# sees the git change and rolls the new version out to the homelab.
+#
+# Required repo secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "deploy/homelab/kustomization.yaml"
+      - "**.md"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE_PREFIX: prateeksavanur/chartdeck
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [ingest, ws-gateway, api, alerts, web]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/${{ matrix.service == 'web' && 'web' || 'service' }}.Dockerfile
+          build-args: SERVICE=${{ matrix.service }}
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,scope=${{ matrix.service }},mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # push the updated image tags back to the repo
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin new image tags in deploy/homelab/kustomization.yaml
+        run: |
+          sed -i -E "s|(newName: ${IMAGE_PREFIX}-[a-z-]+, newTag: )\"[^\"]*\"|\1\"${GITHUB_SHA}\"|" deploy/homelab/kustomization.yaml
+          grep -n "newTag" deploy/homelab/kustomization.yaml
+
+      - name: Commit and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deploy/homelab/kustomization.yaml
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: deploy chartdeck ${GITHUB_SHA::7}"
+          git pull --rebase origin main
+          git push origin HEAD:main
