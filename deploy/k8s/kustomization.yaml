@@ -14,6 +14,13 @@ resources:
   - alerts.yaml
   - web.yaml
   - ingress.yaml
+patches:
+  # Kubernetes injects <SERVICE>_PORT=tcp://... variables for every Service; the one for the `api`
+  # Service is API_PORT, which is also the api's own port setting, so it crashed on start. Every
+  # service here finds the others by DNS, so the injected variables are only harmful.
+  - target: { kind: "(Deployment|StatefulSet)" }
+    patch: |
+      - { op: add, path: /spec/template/spec/enableServiceLinks, value: false }
 # Point these at your registry, e.g. registry.lan:5000/chartdeck/ingest
 images:
   - { name: chartdeck/ingest, newTag: "0.1.0" }
